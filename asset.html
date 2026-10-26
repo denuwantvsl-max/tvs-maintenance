@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2126">
+<title>Machine Details – TVS Maintenance</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="band"></div>
+<header class="top">
+  <div class="row">
+    <a class="brand" href="./">
+      <div class="mark">TVS · <span data-i18n="appName">Maintenance</span></div>
+      <div class="sub" data-i18n="plant">TVS Lanka · Horana Assembly Plant</div>
+    </a>
+    <button class="lang-btn" type="button">සිංහල</button>
+  </div>
+</header>
+
+<main class="wrap" id="out"></main>
+
+<script src="config.js"></script>
+<script src="common.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = CMMS, out = document.getElementById('out'), a = null;
+  C.initLangButton();
+
+  function row(label, val) { return val ? '<dt>' + C.esc(C.t(label)) + '</dt><dd>' + C.esc(val) + '</dd>' : ''; }
+
+  function render() {
+    var h = '';
+    h += '<div class="card"><div class="muted small">' + C.esc(a.area || '') + '</div>' +
+      '<div style="font-size:28px;font-weight:800;letter-spacing:.5px">' + C.esc(a.id) + '</div>' +
+      '<div style="font-size:18px;font-weight:600">' + C.esc(a.name) + '</div>' +
+      '<div class="muted">📍 ' + C.esc(a.location || '') + '</div>' +
+      (a.status && a.status !== 'Active' ? '<div class="msg err" style="margin-bottom:0">' + C.esc(a.status) + '</div>' : '') + '</div>';
+
+    h += '<a class="btn red" href="request.html?asset=' + encodeURIComponent(a.id) + '">🛠️ ' + C.esc(C.t('reportThis')) + '</a>';
+
+    if (a.certRequired || a.certExpiry) {
+      h += '<div class="card"><b>' + C.esc(C.t('certificate')) + '</b><div style="margin-top:6px">' + C.certPill(a.certStatus, a.certExpiry) + '</div>';
+      if (a.staff && a.staff.certUrl) h += '<div style="margin-top:10px"><a href="' + C.esc(a.staff.certUrl) + '" target="_blank" rel="noopener">📄 PDF</a></div>';
+      h += '</div>';
+    }
+
+    h += '<div class="card"><dl class="kv">' + row('make', a.make) + row('model', a.model) + row('serial', a.serial) +
+      row('year', a.year) + (a.parent ? '<dt>' + C.esc(C.t('partOf')) + '</dt><dd><a href="asset.html?id=' + encodeURIComponent(a.parent) + '">' +
+      C.esc(a.parent + (a.parentName ? ' — ' + a.parentName : '')) + '</a></dd>' : '') + '</dl>';
+    if (a.specs) h += '<h3>' + C.esc(C.t('specs')) + '</h3><div class="specs">' + C.esc(a.specs) + '</div>';
+    h += '</div>';
+
+    if (a.children && a.children.length) {
+      h += '<div class="card"><h3 style="margin-top:0">' + C.esc(C.t('components')) + ' (' + a.children.length + ')</h3><table class="simple">' +
+        a.children.map(function (c) {
+          return '<tr><td><a href="asset.html?id=' + encodeURIComponent(c.id) + '">' + C.esc(c.id) + '</a></td><td>' + C.esc(c.name) +
+            '</td><td class="muted">' + C.esc(c.location || '') + '</td></tr>';
+        }).join('') + '</table></div>';
+    }
+
+    if (a.staff) {
+      var s = a.staff;
+      h += '<div class="card"><h3 style="margin-top:0">' + C.esc(C.t('staffOnly')) + '</h3><dl class="kv">' +
+        (s.maintainedBy ? '<dt>Maintained by</dt><dd>' + C.esc(s.maintainedBy) + '</dd>' : '') +
+        (s.pmFrequency ? '<dt>PM frequency</dt><dd>' + C.esc(s.pmFrequency) + '</dd>' : '') +
+        (s.checklistRef ? '<dt>Checklist</dt><dd>' + C.esc(s.checklistRef) + '</dd>' : '') +
+        (s.criticality ? '<dt>Criticality</dt><dd>' + C.esc(s.criticality) + '</dd>' : '') +
+        (s.notes ? '<dt>Notes</dt><dd class="specs">' + C.esc(s.notes) + '</dd>' : '') + '</dl>';
+      h += '<h3>Job history (' + s.jobs.length + ')</h3>';
+      h += s.jobs.length ? '<div class="list">' + s.jobs.map(function (j) {
+        return '<a class="item ' + C.prioClass(j.priority) + '" href="app.html#wo=' + encodeURIComponent(j.id) + '"><div class="top"><span class="id">' +
+          C.esc(j.id) + '</span>' + C.statusPill(j.status) + '</div><div class="ttl">' + C.esc(j.description) + '</div><div class="meta">' +
+          C.esc(C.fmtDate(j.created, false)) + '</div></a>';
+      }).join('') + '</div>' : '<div class="muted">—</div>';
+      h += '</div>';
+    } else {
+      h += '<p class="muted small center"><a href="app.html">' + C.esc(C.t('loginForMore')) + '</a></p>';
+    }
+    out.innerHTML = h;
+  }
+
+  var id = C.param('id');
+  if (!id) { out.innerHTML = '<div class="msg err">No machine ID in the link.</div>'; return; }
+  out.innerHTML = C.loadingHtml();
+  C.api('assetPublic', { id: id }).then(function (d) {
+    a = d; document.title = d.id + ' – ' + d.name; render();
+  }).catch(function (e) {
+    if (e.auth) return C.api('assetPublic', { id: id }).then(function (d) { a = d; render(); });
+    out.innerHTML = '<div class="msg err">' + C.esc(e.message) + '</div>';
+  });
+  document.addEventListener('langchange', function () { if (a) render(); });
+})();
+</script>
+</body>
+</html>

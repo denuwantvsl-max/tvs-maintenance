@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2126">
+<title>Maintenance Team – TVS Horana</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="band no-print"></div>
+<header class="top no-print">
+  <div class="row">
+    <a class="brand" href="./">
+      <div class="mark">TVS · <span data-i18n="appName">Maintenance</span></div>
+      <div class="sub" id="whoami" data-i18n="plant">TVS Lanka · Horana Assembly Plant</div>
+    </a>
+    <button class="lang-btn" type="button">සිංහල</button>
+  </div>
+</header>
+
+<!-- login -->
+<main class="wrap hidden" id="loginView">
+  <h1 data-i18n="teamTitle">Maintenance team</h1>
+  <form id="loginForm" class="card" autocomplete="off">
+    <label class="f" for="lgUser" data-i18n="whoAreYou">Who are you?</label>
+    <select id="lgUser"></select>
+    <label class="f" for="lgPin">PIN</label>
+    <input type="password" id="lgPin" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="current-password">
+    <div id="lgErr" class="hidden"></div>
+    <div style="margin-top:16px"><button class="btn dark" type="submit" id="lgBtn" data-i18n="login">Log in</button></div>
+  </form>
+</main>
+
+<!-- app -->
+<div id="appView" class="hidden">
+  <nav class="tabs no-print" id="tabs">
+    <button data-tab="jobs" class="on" data-i18n="tabJobs">Jobs</button>
+    <button data-tab="assets" data-i18n="tabAssets">Machines</button>
+    <button data-tab="dash" data-i18n="tabDash">Dashboard</button>
+    <button data-tab="labels" data-i18n="tabLabels">QR labels</button>
+    <button data-tab="me" data-i18n="tabMe">Me</button>
+  </nav>
+
+  <section class="wrap wide" id="tab-jobs">
+    <div class="chips no-print" id="jobViews" style="margin-bottom:10px"></div>
+    <div class="toolbar">
+      <input type="search" id="jobQ" data-i18n-ph="searchJobs">
+      <a class="btn sm" href="request.html" data-i18n="newJob">+ New</a>
+    </div>
+    <div id="jobList" class="list"></div>
+  </section>
+
+  <section class="wrap wide hidden" id="tab-assets">
+    <div class="toolbar">
+      <input type="search" id="assetQ" data-i18n-ph="searchAssets">
+      <button class="btn sm mgr" id="assetAdd" type="button" data-i18n="add">+ Add</button>
+    </div>
+    <div class="chips" id="areaChips" style="margin-bottom:10px"></div>
+    <div id="assetList" class="list"></div>
+  </section>
+
+  <section class="wrap wide hidden" id="tab-dash"></section>
+
+  <section class="wrap wide hidden" id="tab-labels">
+    <div class="no-print">
+      <p class="lead" data-i18n="labelsLead">Tick the machines, then press Print. Two labels per row on A4 (cut and laminate).</p>
+      <div class="toolbar">
+        <input type="search" id="lblQ" data-i18n-ph="searchAssets">
+        <button class="btn sm ghost" id="lblAll" type="button" data-i18n="selectAll">Select all</button>
+      </div>
+      <div id="lblPick" class="card" style="max-height:340px;overflow:auto;padding:6px 12px"></div>
+      <button class="btn dark" id="lblPrint" type="button" data-i18n="printLabels">Print labels</button>
+      <p class="hint" id="lblCount"></p>
+    </div>
+    <div class="labels" id="lblOut"></div>
+  </section>
+
+  <section class="wrap hidden" id="tab-me"></section>
+</div>
+
+<!-- full screen detail -->
+<div class="sheet hidden" id="sheet">
+  <div class="bar"><button class="icon-btn" id="sheetBack" type="button">←</button><b id="sheetTitle"></b></div>
+  <div class="wrap" id="sheetBody"></div>
+</div>
+
+<script src="config.js"></script>
+<script src="common.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

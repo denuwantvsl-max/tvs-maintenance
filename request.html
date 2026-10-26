@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2126">
+<title>Report a Problem – TVS Maintenance</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="band"></div>
+<header class="top">
+  <div class="row">
+    <a class="brand" href="./">
+      <div class="mark">TVS · <span data-i18n="appName">Maintenance</span></div>
+      <div class="sub" data-i18n="plant">TVS Lanka · Horana Assembly Plant</div>
+    </a>
+    <button class="lang-btn" type="button">සිංහල</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="formView">
+    <h1 data-i18n="reportTitle">Report a problem</h1>
+    <div id="assetCard" class="card flat hidden"></div>
+    <div id="loadMsg" class="hidden"></div>
+
+    <form id="f" novalidate autocomplete="on">
+      <label class="f" for="name"><span data-i18n="yourName">Your name</span> <span class="req">*</span></label>
+      <input type="text" id="name" name="name" autocomplete="name" maxlength="80" required>
+
+      <label class="f" for="dept"><span data-i18n="department">Department</span> <span class="req">*</span></label>
+      <select id="dept" required></select>
+
+      <div class="grid2">
+        <div>
+          <label class="f" for="email"><span data-i18n="email">Email</span> <span class="opt" data-i18n="optional"></span></label>
+          <input type="email" id="email" autocomplete="email" maxlength="120" inputmode="email">
+        </div>
+        <div>
+          <label class="f" for="phone"><span data-i18n="phone">Phone</span> <span class="opt" data-i18n="optional"></span></label>
+          <input type="tel" id="phone" autocomplete="tel" maxlength="30" inputmode="tel">
+        </div>
+      </div>
+      <div class="hint" data-i18n="emailHint"></div>
+
+      <div id="assetPickWrap">
+        <label class="f" for="asset"><span data-i18n="machine">Machine / equipment</span> <span class="opt" data-i18n="optional"></span></label>
+        <input type="text" id="asset" list="assetList" autocomplete="off">
+        <datalist id="assetList"></datalist>
+        <div class="hint" data-i18n="machineHint"></div>
+      </div>
+
+      <label class="f" for="loc"><span data-i18n="location">Location</span> <span class="req">*</span></label>
+      <input type="text" id="loc" list="locList" maxlength="120" autocomplete="off">
+      <datalist id="locList"></datalist>
+
+      <label class="f"><span data-i18n="category">Type of problem</span> <span class="req">*</span></label>
+      <div class="chips" id="cats"></div>
+
+      <label class="f"><span data-i18n="priority">How urgent?</span> <span class="req">*</span></label>
+      <div class="prio" id="prio"></div>
+
+      <label class="f"><span data-i18n="stopped">Is production stopped?</span></label>
+      <div class="yn">
+        <button type="button" class="chip" data-stop="1" data-i18n="yes">Yes</button>
+        <button type="button" class="chip on" data-stop="0" data-i18n="no">No</button>
+      </div>
+
+      <label class="f" for="desc"><span data-i18n="description">What is the problem?</span> <span class="req">*</span></label>
+      <textarea id="desc" maxlength="2000" data-i18n-ph="descPh"></textarea>
+
+      <label class="f"><span data-i18n="photo">Photo</span> <span class="opt" data-i18n="optional"></span></label>
+      <div class="photo-pick">
+        <label class="btn ghost sm" for="photo" data-i18n="addPhoto">📷 Add photo</label>
+        <input type="file" id="photo" accept="image/*" capture="environment" class="hidden">
+        <img id="photoPrev" class="hidden" alt="">
+        <button type="button" id="photoDel" class="btn ghost sm hidden" data-i18n="removePhoto">Remove</button>
+      </div>
+
+      <div class="hp" aria-hidden="true"><input type="text" id="website" tabindex="-1" autocomplete="off"></div>
+      <div id="err" class="hidden"></div>
+      <div style="margin-top:20px"><button class="btn" id="send" type="submit" data-i18n="submit">Send request</button></div>
+    </form>
+  </div>
+
+  <div id="doneView" class="hidden center">
+    <div class="card">
+      <div style="font-size:44px">✅</div>
+      <h1 data-i18n="sentTitle">Request sent</h1>
+      <div class="muted" data-i18n="jobId">Job ID</div>
+      <div id="newId" style="font-size:30px;font-weight:800;letter-spacing:1px;margin:4px 0 8px"></div>
+      <p class="muted" data-i18n="sentText"></p>
+      <div class="stack">
+        <a class="btn dark" id="trackLink" href="track.html" data-i18n="trackIt">Track this request</a>
+        <a class="btn ghost" href="request.html" data-i18n="reportAnother">Report another problem</a>
+      </div>
+    </div>
+  </div>
+</main>
+<footer class="doc">TVS/QMS/MWRF/01 · Maintenance Work Request</footer>
+
+<script src="config.js"></script>
+<script src="common.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = CMMS, $ = function (id) { return document.getElementById(id); };
+  var meta = null, state = { category: '', priority: '', stopped: false, photo: '', assetId: '' };
+  var PREFS = 'cmms_requester';
+
+  C.initLangButton();
+
+  // remember requester details on this phone
+  try {
+    var saved = JSON.parse(C.store.get(PREFS) || '{}');
+    ['name', 'email', 'phone'].forEach(function (k) { if (saved[k]) $(k).value = saved[k]; });
+    state.savedDept = saved.dept || '';
+  } catch (e) { /* ignore */ }
+
+  function assetLabel(a) { return a.id + ' — ' + a.name; }
+
+  function renderPrio() {
+    $('prio').innerHTML = meta.priorities.map(function (p, i) {
+      var h = p.hours >= 48 ? Math.round(p.hours / 24) + ' ' + C.t('days') : p.hours + ' ' + C.t('hours');
+      var hint = ['pVeryUrgentHint', 'pUrgentHint', 'pGeneralHint'][i];
+      return '<button type="button" class="p' + i + (state.priority === p.name ? ' on' : '') + '" data-p="' + C.esc(p.name) + '">' +
+        '<b>' + C.esc(C.t(p.name)) + '</b><small>' + C.esc(C.t(hint)) + ' · ' + C.esc(C.t('target')) + ' ' + h + '</small></button>';
+    }).join('');
+  }
+
+  function renderAll() {
+    var deptSel = $('dept'), cur = deptSel.value || state.savedDept;
+    deptSel.innerHTML = '<option value="">' + C.esc(C.t('select')) + '</option>' +
+      meta.departments.map(function (d) { return '<option>' + C.esc(d) + '</option>'; }).join('');
+    deptSel.value = cur;
+    $('cats').innerHTML = meta.categories.map(function (c) {
+      return '<button type="button" class="chip' + (state.category === c ? ' on' : '') + '" data-c="' + C.esc(c) + '">' + C.esc(c) + '</button>';
+    }).join('');
+    renderPrio();
+  }
+
+  function showAsset(a) {
+    state.assetId = a.id;
+    $('assetCard').innerHTML = '<div class="muted small" data-i18n="machine">' + C.esc(C.t('machine')) + '</div>' +
+      '<div style="font-size:20px;font-weight:800">' + C.esc(a.id) + '</div><div>' + C.esc(a.name) + '</div>' +
+      '<div class="muted small">📍 ' + C.esc(a.location || '') + '</div>';
+    $('assetCard').classList.remove('hidden');
+    $('assetPickWrap').classList.add('hidden');
+    if (!$('loc').value) $('loc').value = a.location || '';
+  }
+
+  $('f').querySelector('.prio').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-p]'); if (!b) return;
+    state.priority = b.getAttribute('data-p'); renderPrio();
+  });
+  $('cats').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-c]'); if (!b) return;
+    state.category = b.getAttribute('data-c');
+    $('cats').querySelectorAll('.chip').forEach(function (x) { x.classList.toggle('on', x === b); });
+  });
+  document.querySelectorAll('[data-stop]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      state.stopped = b.getAttribute('data-stop') === '1';
+      document.querySelectorAll('[data-stop]').forEach(function (x) { x.classList.toggle('on', x === b); });
+      if (state.stopped && !state.priority) { state.priority = 'Very Urgent'; renderPrio(); }
+    });
+  });
+  $('asset').addEventListener('change', function () {
+    var v = $('asset').value.trim();
+    var id = v.split(' — ')[0].trim().toUpperCase();
+    var a = meta && meta.assets.filter(function (x) { return x.id.toUpperCase() === id; })[0];
+    state.assetId = a ? a.id : '';
+    if (a && !$('loc').value) $('loc').value = a.location || '';
+  });
+  $('photo').addEventListener('change', function () {
+    var f = $('photo').files[0]; if (!f) return;
+    C.shrinkPhoto(f).then(function (data) {
+      state.photo = data; $('photoPrev').src = data;
+      $('photoPrev').classList.remove('hidden'); $('photoDel').classList.remove('hidden');
+    }).catch(function (e) { C.showMsg($('err'), 'err', e.message); });
+  });
+  $('photoDel').addEventListener('click', function () {
+    state.photo = ''; $('photo').value = '';
+    $('photoPrev').classList.add('hidden'); $('photoDel').classList.add('hidden');
+  });
+
+  $('f').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var r = {
+      name: $('name').value.trim(), email: $('email').value.trim(), phone: $('phone').value.trim(), department: $('dept').value,
+      assetId: state.assetId, location: $('loc').value.trim(), category: state.category, priority: state.priority,
+      productionStopped: state.stopped, description: $('desc').value.trim(), photo: state.photo
+    };
+    if (!r.name || !r.department || !r.location || !r.category || !r.priority || r.description.length < 5) {
+      C.showMsg($('err'), 'err', C.t('required')); return;
+    }
+    $('err').classList.add('hidden');
+    $('send').disabled = true; $('send').textContent = C.t('sending');
+    C.store.set(PREFS, JSON.stringify({ name: r.name, email: r.email, phone: r.phone, dept: r.department }));
+    C.api('createRequest', { request: r, website: $('website').value }).then(function (res) {
+      $('newId').textContent = res.id;
+      $('trackLink').href = 'track.html?id=' + encodeURIComponent(res.id);
+      $('formView').classList.add('hidden'); $('doneView').classList.remove('hidden');
+      window.scrollTo(0, 0);
+    }).catch(function (err) {
+      C.showMsg($('err'), 'err', err.message);
+    }).then(function () { $('send').disabled = false; $('send').textContent = C.t('submit'); });
+  });
+
+  document.addEventListener('langchange', function () { if (meta) renderAll(); });
+
+  $('loadMsg').innerHTML = C.loadingHtml(); $('loadMsg').classList.remove('hidden');
+  C.api('meta').then(function (m) {
+    meta = m;
+    $('loadMsg').classList.add('hidden');
+    $('assetList').innerHTML = m.assets.map(function (a) { return '<option value="' + C.esc(assetLabel(a)) + '">'; }).join('');
+    $('locList').innerHTML = m.locations.map(function (l) { return '<option value="' + C.esc(l) + '">'; }).join('');
+    renderAll();
+    var qa = C.param('asset').toUpperCase();
+    if (qa) {
+      var a = m.assets.filter(function (x) { return x.id.toUpperCase() === qa; })[0];
+      if (a) showAsset(a);
+    }
+  }).catch(function (err) { C.showMsg($('loadMsg'), 'err', err.message); });
+})();
+</script>
+</body>
+</html>

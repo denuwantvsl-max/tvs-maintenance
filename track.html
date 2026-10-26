@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2126">
+<title>Track Request – TVS Maintenance</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="band"></div>
+<header class="top">
+  <div class="row">
+    <a class="brand" href="./">
+      <div class="mark">TVS · <span data-i18n="appName">Maintenance</span></div>
+      <div class="sub" data-i18n="plant">TVS Lanka · Horana Assembly Plant</div>
+    </a>
+    <button class="lang-btn" type="button">සිංහල</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <h1 data-i18n="trackTitle">Check my request</h1>
+  <form id="f" class="toolbar">
+    <input type="text" id="id" data-i18n-ph="jobId" autocomplete="off" autocapitalize="characters" maxlength="20">
+    <button class="btn dark sm" type="submit" data-i18n="check">Check</button>
+  </form>
+  <div id="out"></div>
+</main>
+
+<script src="config.js"></script>
+<script src="common.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = CMMS, $ = function (id) { return document.getElementById(id); };
+  var key = C.param('k'), data = null;
+  C.initLangButton();
+
+  function step(cls, label, when) {
+    return '<li class="' + cls + '"><b>' + C.esc(C.t(label)) + '</b><span>' + C.esc(when ? C.fmtDate(when) : '') + '</span></li>';
+  }
+
+  function render() {
+    var d = data, html = '';
+    html += '<div class="card"><div class="top" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+      '<b style="font-size:20px;margin-right:auto">' + C.esc(d.id) + '</b>' + C.prioPill(d.priority) + C.statusPill(d.status) + '</div>';
+    html += '<p style="margin:10px 0">' + C.esc(d.description) + '</p><dl class="kv">';
+    if (d.assetId) html += '<dt>' + C.esc(C.t('machine')) + '</dt><dd>' + C.esc(d.assetId + ' — ' + d.assetName) + '</dd>';
+    html += '<dt>' + C.esc(C.t('location')) + '</dt><dd>' + C.esc(d.location) + '</dd>';
+    if (d.assignedTo) html += '<dt>' + C.esc(C.t('assignedTo')) + '</dt><dd>' + C.esc(d.assignedTo) + '</dd>';
+    if (d.dueAt && ['NEW', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD'].indexOf(d.status) >= 0)
+      html += '<dt>' + C.esc(C.t('dueBy')) + '</dt><dd>' + C.esc(C.fmtDate(d.dueAt)) + '</dd>';
+    if (d.actionTaken) html += '<dt>' + C.esc(C.t('workDone')) + '</dt><dd>' + C.esc(d.actionTaken) + '</dd>';
+    html += '</dl></div>';
+
+    if (d.status === 'REJECTED') {
+      html += '<div class="msg err">' + C.esc(C.t('st_REJECTED')) + '</div>';
+    } else {
+      var st = d.status, order = ['NEW', 'ASSIGNED', 'IN_PROGRESS', 'DONE', 'CLOSED'];
+      var pos = order.indexOf(st === 'ON_HOLD' ? 'IN_PROGRESS' : st);
+      var cls = function (i) { return i < pos ? 'done' : (i === pos ? (st === 'CLOSED' ? 'done' : 'now') : ''); };
+      html += '<div class="card"><ol class="steps">' +
+        step(cls(0), 'stepRequested', d.created) + step(cls(1), 'stepAssigned', d.approvedAt) +
+        step(cls(2), st === 'ON_HOLD' ? 'st_ON_HOLD' : 'stepWorking', d.startedAt) +
+        step(cls(3), 'stepDone', d.completedAt) + step(cls(4), 'stepClosed', d.closedAt) + '</ol></div>';
+    }
+
+    if (d.canConfirm) {
+      html += '<div class="card" id="conf"><h2 style="margin-top:0">' + C.esc(C.t('confirmQ')) + '</h2>' +
+        '<label class="f" for="fb">' + C.esc(C.t('feedback')) + '</label>' +
+        '<textarea id="fb" maxlength="500" placeholder="' + C.esc(C.t('feedbackPh')) + '"></textarea>' +
+        '<div id="cerr" class="hidden"></div><div class="btn-row">' +
+        '<button class="btn green" data-fixed="1">' + C.esc(C.t('fixedYes')) + '</button>' +
+        '<button class="btn ghost" data-fixed="0">' + C.esc(C.t('fixedNo')) + '</button></div></div>';
+    }
+    $('out').innerHTML = html;
+    $('out').querySelectorAll('[data-fixed]').forEach(function (b) {
+      b.addEventListener('click', function () { confirm(b.getAttribute('data-fixed') === '1'); });
+    });
+  }
+
+  function confirm(fixed) {
+    var fb = ($('fb').value || '').trim();
+    if (!fixed && !fb) { C.showMsg($('cerr'), 'err', C.t('feedbackPh')); return; }
+    $('out').querySelectorAll('[data-fixed]').forEach(function (b) { b.disabled = true; });
+    C.api('confirm', { id: data.id, key: key, fixed: fixed, feedback: fb }).then(function () {
+      key = '';
+      return load(data.id).then(function () {
+        $('out').insertAdjacentHTML('afterbegin', '<div class="msg ok">' + C.esc(C.t(fixed ? 'thanksClosed' : 'thanksReopened')) + '</div>');
+      });
+    }).catch(function (e) {
+      C.showMsg($('cerr'), 'err', e.message);
+      $('out').querySelectorAll('[data-fixed]').forEach(function (b) { b.disabled = false; });
+    });
+  }
+
+  function load(id) {
+    $('out').innerHTML = C.loadingHtml();
+    return C.api('track', { id: id, key: key }).then(function (d) {
+      data = d; render();
+      history.replaceState(null, '', 'track.html?id=' + encodeURIComponent(d.id) + (key ? '&k=' + encodeURIComponent(key) : ''));
+    }).catch(function (e) { $('out').innerHTML = '<div class="msg err">' + C.esc(e.message) + '</div>'; });
+  }
+
+  $('f').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var id = $('id').value.trim().toUpperCase();
+    if (id) { key = ''; load(id); }
+  });
+  document.addEventListener('langchange', function () { if (data) render(); });
+  var q = C.param('id');
+  if (q) { $('id').value = q; load(q); }
+})();
+</script>
+</body>
+</html>

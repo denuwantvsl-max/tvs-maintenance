@@ -1,0 +1,29 @@
+# Secrets — never commit
+.env
+.env.*
+*.secret
+*.key
+*.token
+secrets/
+.secrets/
+token*.txt
+.git-credentials
+
+# Internal notes / company data (repo is PUBLIC for GitHub Pages)
+CLAUDE.md
+docs/discovery.md
+_import/
+
+# OS / editor
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# Node / tooling
+node_modules/
+*.log
+
+# Claude local settings
+.claude/
