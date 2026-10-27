@@ -71,6 +71,8 @@
     tgStep1: ['1. Tap the button below. Telegram opens the TVS bot. Press START.', '1. පහත බොත්තම ඔබන්න. Telegram හි TVS bot විවෘත වේ. START ඔබන්න.'],
     tgStep2: ['2. Come back here and tap "I pressed START".', '2. මෙතැනට පැමිණ "මම START එබුවා" ඔබන්න.'],
     tgOpen: ['Open Telegram', 'Telegram විවෘත කරන්න'],
+    tgManual: ['If the button does not open (e.g. office network): on your phone, search the bot in Telegram, press START, then send this code:',
+      'බොත්තම විවෘත නොවේ නම් (උදා: කාර්යාල ජාලය): දුරකථනයේ Telegram හි bot සොයා START ඔබා, මෙම කේතය යවන්න:'],
     tgCheck: ['I pressed START', 'මම START එබුවා'],
     tgNotYet: ['Not received yet. Make sure you pressed START in Telegram, then try again.', 'තවම ලැබී නැත. Telegram හි START එබූ බව තහවුරු කර නැවත උත්සාහ කරන්න.'],
     role: ['Role', 'භූමිකාව'],
