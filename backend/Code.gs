@@ -1,6 +1,6 @@
 /**
  * TVS Horana CMMS – API
- * Google Apps Script web app, bound to the Google Sheet "TVS Horana CMMS DB".
+ * Google Apps Script web app (standalone project) that stores its data in the Google Sheet "TVS Horana CMMS DB".
  * Phase 1: asset register, public QR asset pages, work orders, Telegram + email alerts.
  *
  * Secrets live ONLY in Script Properties (Project Settings > Script Properties):
@@ -11,6 +11,7 @@
  */
 
 var TZ = 'Asia/Colombo';
+var DB_SHEET_ID = '1vkmq3CH5tjTfxaaxLaTCXkLpg4taqWUClQHaWTFrJ-A'; // "TVS Horana CMMS DB"
 var OLD_REQUESTS_SHEET_ID = '1RurjIrWvBDDJYh613ZRUf1kouJISIiU8t7kBObyNL_U'; // old Google Form responses (import only)
 
 var TABLES = {
@@ -862,7 +863,7 @@ function dailyDigest() {
 
 /** Run once (and again any time – it is safe). Creates tabs, headers, settings, photo folder, secret and triggers. */
 function setup() {
-  var ss = SpreadsheetApp.getActive();
+  var ss = db_();
   ss.setSpreadsheetTimeZone(TZ);
   Object.keys(TABLES).forEach(function (name) {
     var sh = ss.getSheetByName(name) || ss.insertSheet(name);
@@ -928,8 +929,7 @@ function importOldRequests() {
     if (!id) { maxN++; id = 'MWRF' + ('000' + maxN).slice(-3); }
     if (have[id]) { skipped++; return; }
     var created = toDate_(r[col('Timestamp')], 'MDY') || new Date();
-    var done = toDate_(r[col('Job completed Timestamp')], 'DMY');
-    if (done && done.getTime() < created.getTime() - 86400000) done = toDate_(r[col('Job completed Timestamp')], 'MDY');
+    var done = completedDate_(r[col('Job completed Timestamp')], created);
     var completed = /complete/i.test(String(r[col('Job Status')] || '')) || !!done;
     var pr = String(r[col('Requirement')] || '').trim();
     if (PRIORITIES.indexOf(pr) < 0) pr = 'General';
@@ -954,6 +954,27 @@ function importOldRequests() {
   Logger.log('Imported ' + added + ' requests, skipped ' + skipped + '.');
 }
 
+/**
+ * Old "Job completed" dates were typed day/month; Sheets turned the ones with day <= 12 into wrong month/day dates.
+ * Try both readings and keep the one closest after the request date.
+ */
+function completedDate_(v, created) {
+  var c = [];
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    c.push(v);
+    var p = Utilities.formatDate(v, TZ, 'yyyy-MM-dd-HH-mm-ss').split('-');
+    if (Number(p[2]) <= 12) c.push(new Date(p[0] + '-' + p[2] + '-' + p[1] + 'T' + p[3] + ':' + p[4] + ':' + p[5] + '+05:30'));
+  } else {
+    c.push(toDate_(v, 'DMY'), toDate_(v, 'MDY'));
+  }
+  var best = null;
+  c.forEach(function (d) {
+    if (!d || isNaN(d.getTime()) || d.getTime() < created.getTime() - 86400000) return;
+    if (!best || d.getTime() < best.getTime()) best = d;
+  });
+  return best || c.filter(function (d) { return d && !isNaN(d.getTime()); })[0] || null;
+}
+
 /** Sends a Telegram test message to every linked admin/supervisor. */
 function sendTelegramTest() {
   notifyRoles_(MANAGER_ROLES, '🔔 Test message from TVS Horana CMMS – ' + Utilities.formatDate(new Date(), TZ, 'dd MMM yyyy HH:mm'));
@@ -963,8 +984,13 @@ function sendTelegramTest() {
  * Sheet helpers
  * ========================================================================= */
 
+/** The database spreadsheet (works whether or not the script is bound to it). */
+function db_() {
+  return SpreadsheetApp.getActive() || SpreadsheetApp.openById(DB_SHEET_ID);
+}
+
 function sheet_(name) {
-  var sh = SpreadsheetApp.getActive().getSheetByName(name);
+  var sh = db_().getSheetByName(name);
   if (!sh) throw new Error('Tab "' + name + '" is missing. Run setup() first.');
   return sh;
 }
@@ -1069,7 +1095,7 @@ function photoFolder_() {
     try { return DriveApp.getFolderById(id); } catch (e) { /* folder deleted – create a new one */ }
   }
   var parent = null;
-  try { parent = DriveApp.getFileById(SpreadsheetApp.getActive().getId()).getParents().next(); } catch (e) { /* use My Drive */ }
+  try { parent = DriveApp.getFileById(db_().getId()).getParents().next(); } catch (e) { /* use My Drive */ }
   var f = parent ? parent.createFolder('TVS CMMS Photos') : DriveApp.createFolder('TVS CMMS Photos');
   props.setProperty('PHOTO_FOLDER_ID', f.getId());
   return f;

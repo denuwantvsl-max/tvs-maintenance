@@ -212,7 +212,7 @@ const sh = old.insertSheet('Form Responses 1');
 sh.data = [
   ['Timestamp', 'Requested by (Name)', 'Category of Request ', 'Request Description / Drawings ', 'Requirement ', 'Email Address',
     'Location of mainteance work ', 'Job ID ', 'Job completed Timestamp ', 'Job Status ', 'Job Approved by ', 'Email feeback '],
-  ['3/1/2024', 'Shantha - Stores', 'Other', 'Replace broken pallets', 'General', 'x@example.com', 'CKD storage', 'MWRF001', '6/3/2024', 'Completed', 'Denuwan', 'sent'],
+  ['3/1/2024', 'Shantha - Stores', 'Other', 'Replace broken pallets', 'General', 'x@example.com', 'CKD storage', 'MWRF001', new Date('2024-06-03T00:00:00+05:30'), 'Completed', 'Denuwan', 'sent'],
   ['3/15/2024', 'Chamara', 'General Maintenace', 'Weld beam', 'Very Urgent', 'x@example.com', 'Rectification', 'MWRF008', '22/3/2024', 'Completed', 'Denuwan', 'sent'],
   ['11/6/2024 9:12', 'Denuwan', 'General Maintenace', 'Test', 'General', 'x@example.com', 'Test', 'MWRF058', '', '', '', ''],
   ['8/1/2026 12:13:17', 'Nelantha', 'Electrical', 'Exhaust fan not working', 'Very Urgent', 'y@example.com', 'SKD Washroom', '', '', '', '', '']
