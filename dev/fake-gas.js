@@ -134,6 +134,7 @@
   Sheet.prototype.getDataRange = function () { return new Range(this, 1, 1, Math.max(this.getLastRow(), 1), Math.max(this.getLastColumn(), 1)); };
   Sheet.prototype.appendRow = function (row) { this.getRange(this.getLastRow() + 1, 1, 1, row.length).setValues([row]); };
   Sheet.prototype.setFrozenRows = function () { return this; };
+  Sheet.prototype.deleteRow = function (r) { this.data.splice(r - 1, 1); };
 
   function Spreadsheet(id) { this.id = id; this.sheets = [new Sheet('Sheet1')]; }
   Spreadsheet.prototype.getSheetByName = function (n) { return this.sheets.filter(function (s) { return s.name === n; })[0] || null; };
@@ -148,12 +149,14 @@
 
   /* ---------- Date formatting (Asia/Colombo = UTC+05:30, no DST) ---------- */
   var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   function formatDate(d, tz, fmt) {
     var t = new Date(new Date(d).getTime() + 330 * 60000);
     var p2 = function (n) { return ('0' + n).slice(-2); };
     var map = { yyyy: t.getUTCFullYear(), MMM: MON[t.getUTCMonth()], MM: p2(t.getUTCMonth() + 1), dd: p2(t.getUTCDate()),
-      HH: p2(t.getUTCHours()), mm: p2(t.getUTCMinutes()), ss: p2(t.getUTCSeconds()), H: t.getUTCHours(), u: (t.getUTCDay() || 7) };
-    return fmt.replace(/'([^']*)'|yyyy|MMM|MM|dd|HH|mm|ss|H|u/g, function (m, lit) { return lit !== undefined ? lit : map[m]; });
+      HH: p2(t.getUTCHours()), mm: p2(t.getUTCMinutes()), ss: p2(t.getUTCSeconds()), H: t.getUTCHours(), u: (t.getUTCDay() || 7),
+      EEE: DAY[t.getUTCDay()], yy: String(t.getUTCFullYear()).slice(2) };
+    return fmt.replace(/'([^']*)'|yyyy|yy|EEE|MMM|MM|dd|HH|mm|ss|H|u/g, function (m, lit) { return lit !== undefined ? lit : map[m]; });
   }
 
   var Blob = function (bytes, type, name) { this.bytes = bytes; this.type = type; this.name = name; };

@@ -92,6 +92,76 @@
     d_certs: ['Certificates to renew', 'අලුත් කළ යුතු සහතික'],
     publicPage: ['Public page', 'පොදු පිටුව'],
     newAsset: ['New machine', 'නව යන්ත්‍රය'],
+    tabPm: ['PM', 'නඩත්තු සැලසුම'],
+    qrShort: ['QR labels', 'QR ලේබල'],
+    searchPm: ['Search PM tasks / machine ID…', 'නඩත්තු කාර්ය / යන්ත්‍ර අංකය සොයන්න…'],
+    pv_due: ['Due now', 'දැන් කළ යුතු'],
+    pv_week: ['This week', 'මෙම සතිය'],
+    pv_mine: ['Mine', 'මගේ'],
+    pv_unscheduled: ['No date', 'දිනයක් නැත'],
+    pv_all: ['All tasks', 'සියලු කාර්ය'],
+    pv_history: ['History', 'ඉතිහාසය'],
+    pmLate: ['{n} d late', 'දින {n} ප්‍රමාදයි'],
+    pmToday: ['Due today', 'අද කළ යුතුයි'],
+    pmHours: ['Hours reached', 'පැය සම්පූර්ණයි'],
+    pmNoDate: ['No date set', 'දිනයක් නැත'],
+    pmNothingDue: ['Nothing due right now 👍', 'දැනට කළ යුතු දෙයක් නැත 👍'],
+    pmFreq: ['Frequency', 'වාර ගණන'],
+    pmNext: ['Next due', 'ඊළඟ දිනය'],
+    pmLast: ['Last done', 'අවසන් වරට කළේ'],
+    pmMeter: ['Hour meter', 'පැය මීටරය'],
+    pmMeterIn: ['Hour meter reading', 'පැය මීටර කියවීම'],
+    pmMeterInt: ['Also due every … hours (optional)', 'තවද පැය … කට වරක් (අත්‍යවශ්‍ය නැත)'],
+    pmAnyone: ['Anyone in the team', 'කණ්ඩායමේ ඕනෑම අයෙක්'],
+    pmChecklist: ['Checklist', 'පරීක්ෂණ ලැයිස්තුව'],
+    pmNoChecklist: ['— No checklist (service record only) —', '— ලැයිස්තුවක් නැත (සේවා වාර්තාව පමණි) —'],
+    pmDoCheck: ['Fill the checklist', 'පරීක්ෂණ ලැයිස්තුව පුරවන්න'],
+    pmDoService: ['Record the service', 'සේවාව සටහන් කරන්න'],
+    pmAllOk: ['Mark all OK', 'සියල්ල හරි ලෙස ලකුණු කරන්න'],
+    pmPerChild: ['Check every tool. Tap "Mark all OK", then change only the faulty ones.', 'සෑම මෙවලමක්ම පරීක්ෂා කරන්න. "සියල්ල හරි" ඔබා දෝෂ ඇති ඒවා පමණක් වෙනස් කරන්න.'],
+    pmRemarks: ['Remarks / work done', 'සටහන් / කළ වැඩ'],
+    pmSubmit: ['Save record', 'වාර්තාව සුරකින්න'],
+    pmSaved: ['Record saved', 'වාර්තාව සුරකින ලදී'],
+    pmJobOpened: ['Not OK items found – repair job {id} opened and the team alerted.', 'දෝෂ හමු විය – අලුත්වැඩියා රැකියාව {id} විවෘත කර කණ්ඩායමට දැනුම් දෙන ලදී.'],
+    pmViewRecord: ['View / print record', 'වාර්තාව බලන්න / මුද්‍රණය'],
+    pmRecordNo: ['Record no.', 'වාර්තා අංකය'],
+    pmTask: ['PM task', 'නඩත්තු කාර්යය'],
+    pmDoneAt: ['Date', 'දිනය'],
+    pmJob: ['Repair job', 'අලුත්වැඩියා රැකියාව'],
+    pmCheckItem: ['Check', 'පරීක්ෂාව'],
+    pmResult: ['Result', 'ප්‍රතිඵලය'],
+    pmCheckedBy: ['Checked by', 'පරීක්ෂා කළේ'],
+    pmReviewedBy: ['Reviewed by', 'සමාලෝචනය කළේ'],
+    pmNewTask: ['New PM task', 'නව නඩත්තු කාර්යය'],
+    pmTitle: ['Task title', 'කාර්යයේ නම'],
+    pmScope: ['Which checklist items', 'කුමන අයිතම'],
+    pmEvery: ['Repeat every', 'නැවත කරන්නේ'],
+    pmActive: ['Active', 'සක්‍රීයයි'],
+    u_day: ['day(s)', 'දින'],
+    u_week: ['week(s)', 'සති'],
+    u_month: ['month(s)', 'මාස'],
+    u_none: ['One-off / no repeat', 'එක් වරක් පමණි'],
+    ok: ['OK', 'හරි'],
+    nok: ['Not OK', 'දෝෂයි'],
+    na: ['N/A', 'අදාළ නැත'],
+    print: ['Print', 'මුද්‍රණය'],
+    d_pm: ['Preventive maintenance', 'වැළැක්වීමේ නඩත්තුව'],
+    k_pmToday: ['PM due today', 'අද කළ යුතු නඩත්තු'],
+    k_pmOverdue: ['PM overdue', 'ප්‍රමාද නඩත්තු'],
+    k_pmDone: ['PM done this month', 'මෙම මාසයේ කළ නඩත්තු'],
+    k_pmComp: ['PM compliance', 'නඩත්තු අනුකූලතාව'],
+    pmForMachine: ['PM tasks', 'නඩත්තු කාර්ය'],
+    addPmTask: ['+ PM task', '+ නඩත්තු කාර්යය'],
+    machinePhoto: ['Machine photo', 'යන්ත්‍රයේ ඡායාරූපය'],
+    removeMachine: ['Remove machine', 'යන්ත්‍රය ඉවත් කරන්න'],
+    removeHint: ['Machines with job or PM history are kept as "Disposed" (history stays). Others are deleted.',
+      'රැකියා හෝ නඩත්තු ඉතිහාසයක් ඇති යන්ත්‍ර "ඉවත් කළ" ලෙස තබා ගනී. අනෙක් ඒවා මකා දමයි.'],
+    removeConfirm: ['Remove {id}?', '{id} ඉවත් කරන්නද?'],
+    removeReason: ['Reason (optional), e.g. scrapped, replaced, duplicate', 'හේතුව (අත්‍යවශ්‍ය නැත)'],
+    removedDeleted: ['Machine deleted.', 'යන්ත්‍රය මකා දමන ලදී.'],
+    removedDisposed: ['Machine marked as Disposed. Its history is kept.', 'යන්ත්‍රය ඉවත් කළ ලෙස සලකුණු කළා. ඉතිහාසය තබා ඇත.'],
+    showDisposed: ['Show removed machines', 'ඉවත් කළ යන්ත්‍ර පෙන්වන්න'],
+    showActive: ['Show active machines', 'සක්‍රීය යන්ත්‍ර පෙන්වන්න'],
     saved: ['Saved.', 'සුරකින ලදී.']
   });
 
@@ -147,7 +217,9 @@
   /* ---------------- tabs ---------------- */
   function showTab(name) {
     document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-tab') === name); });
-    ['jobs', 'assets', 'dash', 'labels', 'me'].forEach(function (n) { $('tab-' + n).classList.toggle('hidden', n !== name); });
+    if (name === 'labels') document.querySelector('#tabs [data-tab="assets"]').classList.add('on');
+    ['jobs', 'pm', 'assets', 'dash', 'labels', 'me'].forEach(function (n) { $('tab-' + n).classList.toggle('hidden', n !== name); });
+    if (name === 'pm') { renderPmViews(); loadPm(); }
     if (name === 'assets') loadAssets().then(renderAssets);
     if (name === 'dash') loadDash();
     if (name === 'labels') loadAssets().then(renderLabelPick);
@@ -204,12 +276,16 @@
     closeSheet();
     if (!$('tab-jobs').classList.contains('hidden')) loadJobs();
     if (!$('tab-assets').classList.contains('hidden')) { S.assets = null; loadAssets().then(renderAssets); }
+    if (!$('tab-pm').classList.contains('hidden')) loadPm();
   });
   function route() {
     var h = location.hash.replace(/^#/, '');
-    var m = /^wo=(.+)$/.exec(h), a = /^asset=(.*)$/.exec(h);
+    var m = /^wo=(.+)$/.exec(h), a = /^asset=(.*)$/.exec(h), pm = /^pm=(.*)$/.exec(h), rec = /^rec=(.+)$/.exec(h), pe = /^pmedit=(.*)$/.exec(h);
     if (m) openJob(decodeURIComponent(m[1]));
     else if (a) openAsset(decodeURIComponent(a[1]));
+    else if (pm) openPm(decodeURIComponent(pm[1]));
+    else if (rec) openRecord(decodeURIComponent(rec[1]));
+    else if (pe) openPmEditor(decodeURIComponent(pe[1]));
     else closeSheet();
   }
   window.addEventListener('hashchange', function () { if (S.user) route(); });
@@ -374,13 +450,22 @@
         return '<button type="button" class="chip' + (S.area === k ? ' on' : '') + '" data-area="' + esc(k) + '">' + esc(k) + ' <span class="n">' + areas[k] + '</span></button>';
       }).join('');
     var q = $('assetQ').value.trim().toLowerCase();
-    var list = S.assets.filter(function (a) { return (!S.area || a.Area === S.area) && assetMatches(a, q); });
+    var disposed = S.assets.filter(function (a) { return a.Status === 'Disposed'; }).length;
+    var list = S.assets.filter(function (a) {
+      return (!S.area || a.Area === S.area) && assetMatches(a, q) && (S.showDisposed ? a.Status === 'Disposed' : a.Status !== 'Disposed');
+    });
     $('assetList').innerHTML = list.map(function (a) {
-      return '<button type="button" class="item" data-asset="' + esc(a.AssetID) + '"><div class="top"><span class="id">' + esc(a.AssetID) + '</span>' +
+      return '<button type="button" class="item has-thumb" data-asset="' + esc(a.AssetID) + '">' +
+        (a.photoUrl ? '<img class="thumb" src="' + esc(a.photoUrl) + '" alt="" loading="lazy">' : '') +
+        '<div class="top"><span class="id">' + esc(a.AssetID) + '</span>' +
+        (a.Status && a.Status !== 'Active' ? '<span class="pill st-REJECTED">' + esc(a.Status) + '</span>' : '') +
         (a.openJobs ? '<span class="pill st-IN_PROGRESS">' + a.openJobs + ' open</span>' : '') +
         (a.certStatus !== 'none' ? C.certPill(a.certStatus, a.CertExpiry) : '') + '</div><div class="ttl">' + esc(a.Name) + '</div><div class="meta">📍 ' +
         esc(a.Location || '') + (a.Make ? ' · ' + esc(a.Make) : '') + (a.ParentID ? ' · ⤴ ' + esc(a.ParentID) : '') + '</div></button>';
     }).join('') || '<div class="muted center" style="padding:24px">—</div>';
+    $('assetList').insertAdjacentHTML('beforeend', disposed ? '<button type="button" class="btn ghost sm" id="toggleDisposed" style="margin:8px auto 0">' +
+      esc(S.showDisposed ? t('showActive') : t('showDisposed') + ' (' + disposed + ')') + '</button>' : '');
+    if ($('toggleDisposed')) $('toggleDisposed').addEventListener('click', function (e) { e.stopPropagation(); S.showDisposed = !S.showDisposed; renderAssets(); });
   }
   $('areaChips').addEventListener('click', function (e) {
     var b = e.target.closest('[data-area]'); if (!b) return; S.area = b.getAttribute('data-area'); renderAssets();
@@ -390,6 +475,7 @@
     var b = e.target.closest('[data-asset]'); if (b) location.hash = 'asset=' + encodeURIComponent(b.getAttribute('data-asset'));
   });
   $('assetAdd').addEventListener('click', function () { location.hash = 'asset='; });
+  $('assetQr').addEventListener('click', function () { showTab('labels'); });
 
   var ASSET_FIELDS = [
     ['AssetID', 'Asset ID *'], ['Name', 'Name *'], ['Area', 'Area'], ['Location', 'Location'], ['Category', 'Category'],
@@ -397,18 +483,26 @@
     ['Specs', 'Specifications (one per line, e.g. "Power: 30 kW")', 'area'], ['Criticality', 'Criticality', ['', 'A', 'B', 'C']],
     ['Status', 'Status', ['Active', 'Out of service', 'Disposed']], ['MaintainedBy', 'Maintained by'], ['PMFrequency', 'PM frequency'],
     ['ChecklistRef', 'Checklist ref. (e.g. TVS/QMS/CL/29)'], ['CertRequired', 'Statutory certificate required?', ['', 'Yes', 'No']],
-    ['CertExpiry', 'Certificate valid until', 'date'], ['CertFileId', 'Certificate PDF (Google Drive link)'], ['Notes', 'Notes', 'area']
+    ['CertExpiry', 'Certificate valid until', 'date'], ['CertFileId', 'Certificate PDF (Google Drive link)'],
+    ['MeterUnit', 'Hour meter? (h = hours)', ['', 'h', 'km']], ['CurrentMeter', 'Current meter reading'], ['Notes', 'Notes', 'area']
   ];
 
   function openAsset(id) {
     var go = function () {
       var a = id ? S.assets.filter(function (x) { return x.AssetID === id; })[0] : {};
       if (id && !a) { openSheet(id, '<div class="msg err">Not found</div>'); return; }
-      var editable = isMgr(), h = '';
+      var editable = isMgr(), h = '', photo = '', removePhoto = false;
       if (id) {
         h += '<div class="btn-row"><a class="btn ghost sm" href="asset.html?id=' + encodeURIComponent(id) + '" target="_blank" rel="noopener">' + esc(t('publicPage')) + ' ↗</a>' +
-          '<a class="btn ghost sm" href="request.html?asset=' + encodeURIComponent(id) + '">' + esc(t('reportThis')) + '</a></div>';
+          '<a class="btn ghost sm" href="request.html?asset=' + encodeURIComponent(id) + '">' + esc(t('reportThis')) + '</a>' +
+          '<button class="btn ghost sm" type="button" id="asPm">' + esc(t('pmForMachine')) + '</button>' +
+          (editable ? '<a class="btn ghost sm" href="#pmedit=?asset=' + encodeURIComponent(id) + '">' + esc(t('addPmTask')) + '</a>' : '') + '</div>';
       }
+      h += '<div class="card"><label class="f">' + esc(t('machinePhoto')) + '</label><div class="photo-pick asset-photo">' +
+        '<img id="asPhotoPrev" class="' + (a.photoUrl ? '' : 'hidden') + '" src="' + esc(a.photoUrl || '') + '" alt="">' +
+        (editable ? '<label class="btn ghost sm" for="asPhoto">' + esc(t('addPhoto')) + '</label><input type="file" id="asPhoto" accept="image/*" capture="environment" class="hidden">' +
+          '<button type="button" class="btn ghost sm' + (a.photoUrl ? '' : ' hidden') + '" id="asPhotoDel">' + esc(t('removePhoto')) + '</button>' : (a.photoUrl ? '' : '<span class="muted">—</span>')) +
+        '</div></div>';
       h += '<div class="card">' + ASSET_FIELDS.map(function (f) {
         var key = f[0], val = a[key] === undefined ? '' : a[key], dis = (!editable || (key === 'AssetID' && id)) ? ' disabled' : '';
         if (key === 'CertExpiry') val = C.toLocalInput(val, true);
@@ -421,14 +515,42 @@
         return field('as_' + key, f[1], input);
       }).join('') + (editable ? '<div id="asErr" class="hidden"></div><div style="margin-top:16px"><button class="btn dark" id="asSave" type="button">' + esc(t('save')) + '</button></div>' : '') + '</div>';
       if (id && a.CertFileId) h += '<p><a href="https://drive.google.com/file/d/' + esc(a.CertFileId) + '/view" target="_blank" rel="noopener">📄 ' + esc(t('certificate')) + '</a></p>';
+      if (id && editable && a.Status !== 'Disposed') {
+        h += '<div class="card danger-zone"><h3 style="margin-top:0">' + esc(t('removeMachine')) + '</h3><p class="muted small">' + esc(t('removeHint')) + '</p>' +
+          '<div id="rmErr" class="hidden"></div><button class="btn ghost sm danger" id="asRemove" type="button">' + esc(t('removeMachine')) + '</button></div>';
+      }
       openSheet(id || t('newAsset'), h);
       if (S.flash) { $('sheetBody').insertAdjacentHTML('afterbegin', '<div class="msg ok">' + esc(S.flash) + '</div>'); S.flash = ''; }
+      if ($('asPm')) $('asPm').addEventListener('click', function () {
+        history.pushState(null, '', location.pathname + location.search); closeSheet();
+        $('pmQ').value = id; S.pmView = 'all'; showTab('pm');
+      });
+      if ($('asPhoto')) $('asPhoto').addEventListener('change', function () {
+        var f = $('asPhoto').files[0]; if (!f) return;
+        C.shrinkPhoto(f, 1280).then(function (d) {
+          photo = d; removePhoto = false; $('asPhotoPrev').src = d; $('asPhotoPrev').classList.remove('hidden'); $('asPhotoDel').classList.remove('hidden');
+        });
+      });
+      if ($('asPhotoDel')) $('asPhotoDel').addEventListener('click', function () {
+        photo = ''; removePhoto = true; $('asPhotoPrev').classList.add('hidden'); $('asPhotoDel').classList.add('hidden');
+      });
+      if ($('asRemove')) $('asRemove').addEventListener('click', function () {
+        if (!confirm(t('removeConfirm').replace('{id}', id))) return;
+        var reason = prompt(t('removeReason')) || '';
+        $('asRemove').disabled = true;
+        C.api('assetRemove', { id: id, reason: reason }).then(function (r) {
+          return loadAssets(true).then(function () {
+            history.pushState(null, '', location.pathname + location.search); closeSheet(); renderAssets();
+            alert(r.mode === 'deleted' ? t('removedDeleted') : t('removedDisposed'));
+          });
+        }).catch(function (e) { handleErr(e, $('rmErr')); $('asRemove').disabled = false; });
+      });
       if (editable) $('asSave').addEventListener('click', function () {
         var data = {};
         ASSET_FIELDS.forEach(function (f) { data[f[0]] = $('as_' + f[0]).value.trim(); });
         if (id) data.AssetID = id;
         $('asSave').disabled = true;
-        C.api('assetSave', { asset: data, isNew: !id }).then(function (r) {
+        C.api('assetSave', { asset: data, isNew: !id, photo: photo, removePhoto: removePhoto }).then(function (r) {
           return loadAssets(true).then(function () {
             S.flash = t('saved');
             if (id === r.id) openAsset(r.id); else location.hash = 'asset=' + encodeURIComponent(r.id);
@@ -450,6 +572,9 @@
       var h = '<div class="kpis">' + tile(k.open, 'k_open') + tile(k.overdue, 'k_overdue', true) + tile(k.newCount, 'k_new') + tile(k.stoppedNow, 'k_stopped', true) +
         tile(k.waitingConfirm, 'k_confirm') + tile(k.createdMonth, 'k_created') + tile(k.closedMonth, 'k_closed') + tile(k.avgCloseHours, 'k_avg') +
         tile(Math.round(k.downtimeMonthMin / 6) / 10, 'k_down') + tile(Math.round(k.costMonth).toLocaleString(), 'k_cost') + '</div>';
+      h += '<h2>' + esc(t('d_pm')) + '</h2><div class="kpis">' + tile(k.pmToday, 'k_pmToday') + tile(k.pmOverdue, 'k_pmOverdue', true) +
+        tile(k.pmDoneMonth, 'k_pmDone') + tile(k.pmCompliance === null ? null : k.pmCompliance + '%', 'k_pmComp') + '</div>';
+      if (d.pmDue && d.pmDue.length) h += '<div class="list" style="margin-top:10px">' + d.pmDue.map(pmCard).join('') + '</div>';
       h += '<h2>' + esc(t('d_overdue')) + '</h2>' + (d.overdue.length ? '<div class="list">' + d.overdue.map(jobCard).join('') + '</div>' : '<div class="muted">—</div>');
       h += '<div class="card"><h3 style="margin-top:0">' + esc(t('d_person')) + '</h3><table class="simple">' +
         (d.perPerson.map(function (p) { return '<tr><td>' + esc(p.name) + '</td><td class="num">' + p.count + '</td></tr>'; }).join('') || '<tr><td>—</td></tr>') + '</table></div>';
@@ -463,6 +588,239 @@
         }).join('') || '<tr><td>✓</td></tr>') + '</table></div>';
       box.innerHTML = h;
     }).catch(function (e) { handleErr(e); box.innerHTML = ''; });
+  }
+
+  /* ---------------- preventive maintenance ---------------- */
+  var PM_VIEWS = ['due', 'week', 'mine', 'unscheduled', 'all', 'history'];
+  function renderPmViews() {
+    S.pmView = S.pmView || 'due';
+    $('pmViews').innerHTML = PM_VIEWS.map(function (v) {
+      return '<button type="button" class="chip' + (S.pmView === v ? ' on' : '') + '" data-pv="' + v + '">' + esc(t('pv_' + v)) + '</button>';
+    }).join('');
+  }
+  $('pmViews').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-pv]'); if (!b) return;
+    S.pmView = b.getAttribute('data-pv'); renderPmViews(); loadPm();
+  });
+  var pmTimer;
+  $('pmQ').addEventListener('input', function () { clearTimeout(pmTimer); pmTimer = setTimeout(loadPm, 350); });
+  $('pmAdd').addEventListener('click', function () { location.hash = 'pmedit='; });
+
+  function dueLabel(x) {
+    if (x.state === 'overdue') return '<span class="pill badge-late">' + esc(t('pmLate').replace('{n}', x.daysLate)) + '</span>';
+    if (x.state === 'today') return '<span class="pill st-IN_PROGRESS">' + esc(x.meterLeft !== null && x.meterLeft <= 0 ? t('pmHours') : t('pmToday')) + '</span>';
+    if (x.state === 'soon') return '<span class="pill st-NEW">' + esc(C.fmtDate(x.nextDue, false)) + '</span>';
+    if (x.state === 'unscheduled') return '<span class="pill st-REJECTED">' + esc(t('pmNoDate')) + '</span>';
+    return '<span class="pill st-CLOSED">' + esc(C.fmtDate(x.nextDue, false)) + '</span>';
+  }
+  function pmCard(x) {
+    var cls = { overdue: 'p0', today: 'p1' }[x.state] || 'p2';
+    return '<button type="button" class="item ' + cls + '" data-pm="' + esc(x.id) + '"><div class="top"><span class="id">' + esc(x.assetId) + '</span>' + dueLabel(x) + '</div>' +
+      '<div class="ttl">' + esc(x.title) + '</div><div class="meta">' + esc(x.assetName || '') + ' · 🔁 ' + esc(x.freq) +
+      (x.meterLeft !== null ? ' · ⏱ ' + esc(x.meterLeft) + ' h left' : '') + (x.assignedName ? ' · 👷 ' + esc(x.assignedName) : '') +
+      (x.doneBy && x.doneBy !== 'Internal' ? ' · 🏢 ' + esc(x.doneBy) : '') + '</div></button>';
+  }
+  function recCard(r) {
+    return '<button type="button" class="item ' + (r.notOkCount > 0 ? 'p1' : 'p2') + '" data-rec="' + esc(r.id) + '"><div class="top"><span class="id">' + esc(r.id) + '</span>' +
+      (r.notOkCount > 0 ? '<span class="pill badge-late">' + r.notOkCount + ' ✗</span>' : '<span class="pill st-CLOSED">✓ ' + (r.okCount || 0) + '</span>') + '</div>' +
+      '<div class="ttl">' + esc(r.assetId + ' · ' + r.title) + '</div><div class="meta">' + esc(C.fmtDate(r.doneAt)) + ' · 👷 ' + esc(r.doneBy) +
+      (r.woId ? ' · ' + esc(r.woId) : '') + '</div></button>';
+  }
+  function loadPm() {
+    var box = $('pmList');
+    box.innerHTML = C.loadingHtml();
+    var q = $('pmQ').value.trim();
+    var p = S.pmView === 'history' ? C.api('pmRecords', { assetId: /^[A-Z0-9][A-Z0-9-]+$/i.test(q) ? q : '' })
+      : C.api('pmList', { view: S.pmView, q: q });
+    return p.then(function (r) {
+      if (S.pmView === 'history') { box.innerHTML = r.length ? r.map(recCard).join('') : '<div class="muted center" style="padding:24px">—</div>'; return; }
+      box.innerHTML = r.tasks.length ? r.tasks.map(pmCard).join('') : '<div class="muted center" style="padding:24px">' + esc(t(S.pmView === 'due' ? 'pmNothingDue' : 'noJobs')) + '</div>';
+    }).catch(function (e) { handleErr(e); box.innerHTML = ''; });
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-pm]');
+    if (b) { e.preventDefault(); location.hash = 'pm=' + b.getAttribute('data-pm'); return; }
+    var r = e.target.closest('[data-rec]');
+    if (r) { e.preventDefault(); location.hash = 'rec=' + r.getAttribute('data-rec'); }
+  });
+
+  /* task detail + checklist form */
+  function openPm(id) {
+    openSheet(id, C.loadingHtml());
+    C.api('pmTask', { id: id }).then(function (x) { S.pm = x; renderPmTask(); })
+      .catch(function (e) { if (e.auth) return handleErr(e); $('sheetBody').innerHTML = '<div class="msg err">' + esc(e.message) + '</div>'; });
+  }
+  function itemText(it) { return C.lang() === 'si' && it.textSi ? it.textSi : it.text; }
+  function seg(key) {
+    return '<div class="seg" data-key="' + esc(key) + '"><button type="button" data-v="ok">✓ ' + esc(t('ok')) + '</button>' +
+      '<button type="button" data-v="nok">✗ ' + esc(t('nok')) + '</button><button type="button" data-v="na">' + esc(t('na')) + '</button></div>';
+  }
+  function renderPmTask() {
+    var x = S.pm, tpl = x.template, h = '';
+    $('sheetTitle').textContent = x.assetId + ' · ' + x.title;
+    h += '<div class="card"><div class="top" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' + dueLabel(x) + '</div>' +
+      '<h2 style="margin:8px 0 4px">' + esc(x.title) + '</h2><dl class="kv">' +
+      kv(t('machine'), x.assetId + ' — ' + (x.asset ? x.asset.name : '')) + kv(t('location'), x.asset && x.asset.location) +
+      kv(t('pmFreq'), x.freq) + kv(t('pmNext'), x.nextDue ? C.fmtDate(x.nextDue, false) : t('pmNoDate')) +
+      kv(t('pmLast'), x.lastDone ? C.fmtDate(x.lastDone) : '—') +
+      (x.meterInterval ? kv(t('pmMeter'), (x.asset && x.asset.currentMeter !== '' ? x.asset.currentMeter + ' h' : '—') + (x.meterLeft !== null ? ' · ' + x.meterLeft + ' h left' : '')) : '') +
+      kv(t('assignedTo'), x.assignedName || t('pmAnyone')) + kv(t('doneBy'), x.doneBy) +
+      (tpl ? kv(t('pmChecklist'), (tpl.docNo || tpl.id) + ' · ' + tpl.title) : '') + kv(t('note'), x.notes) + '</dl>' +
+      (isMgr() ? '<div class="btn-row"><a class="btn ghost sm" href="#pmedit=' + encodeURIComponent(x.id) + '">' + esc(t('a_edit')) + '</a></div>' : '') + '</div>';
+
+    h += '<form id="pmForm" class="card" autocomplete="off" novalidate><h3 style="margin-top:0">' + esc(t(tpl ? 'pmDoCheck' : 'pmDoService')) + '</h3>';
+    if (x.asset && x.asset.meterUnit) {
+      h += field('pmMeterIn', t('pmMeterIn') + ' (' + x.asset.meterUnit + ')' + (x.meterInterval ? ' *' : ''),
+        '<input type="number" id="pmMeterIn" inputmode="decimal" step="0.1" placeholder="' + esc(x.asset.currentMeter !== '' ? '≥ ' + x.asset.currentMeter : '') + '">');
+    }
+    if (tpl) {
+      h += '<div class="btn-row" style="margin-bottom:6px"><button type="button" class="btn ghost sm" id="pmAllOk">✓ ' + esc(t('pmAllOk')) + '</button></div>';
+      if (x.children && x.children.length) {
+        var checks = tpl.items.filter(function (it) { return it.type === 'check'; });
+        h += '<p class="hint">' + esc(t('pmPerChild')) + '</p>';
+        h += x.children.map(function (c) {
+          return '<div class="child-row"><div class="child-id"><b>' + esc(c.id) + '</b><span class="muted small">' + esc(c.location || '') + '</span></div>' +
+            checks.map(function (it) { return '<div class="ck-row"><span>' + esc(itemText(it)) + '</span>' + seg(c.id + '|' + it.no) + '</div>'; }).join('') + '</div>';
+        }).join('');
+      } else {
+        var lastSec = null;
+        tpl.items.forEach(function (it) {
+          if (it.section && it.section !== lastSec) { h += '<div class="ck-sec">' + esc(it.section) + '</div>'; lastSec = it.section; }
+          var label = '<span>' + esc(itemText(it)) + (it.freq && it.freq !== x.scope ? ' <em class="freq">' + esc(it.freq) + '</em>' : '') + '</span>';
+          if (it.type === 'number') {
+            h += '<div class="ck-row">' + label + '<div class="num-in"><input type="number" step="any" inputmode="decimal" data-num="' + esc(it.no) + '"><span>' + esc(it.unit || '') +
+              (it.min !== null || it.max !== null ? ' <small class="muted">(' + (it.min !== null ? it.min : '') + '–' + (it.max !== null ? it.max : '') + ')</small>' : '') + '</span></div></div>';
+          } else if (it.type === 'text') {
+            h += '<div class="ck-row col">' + label + '<input type="text" data-txt="' + esc(it.no) + '" maxlength="300"></div>';
+          } else {
+            h += '<div class="ck-row">' + label + seg(it.no) + '</div>';
+          }
+        });
+      }
+    }
+    if (!tpl || (x.doneBy && x.doneBy !== 'Internal')) {
+      h += '<div class="grid2"><div>' + field('pmContr', t('contractor'), '<input type="text" id="pmContr" maxlength="100" value="' + esc(x.doneBy !== 'Internal' ? x.doneBy : '') + '">') +
+        '</div><div>' + field('pmCost', t('cost'), '<input type="number" id="pmCost" min="0" inputmode="numeric">') + '</div></div>';
+    }
+    h += field('pmRemarks', t('pmRemarks') + (tpl ? '' : ' *'), '<textarea id="pmRemarks" maxlength="1000" style="min-height:70px"></textarea>') +
+      '<label class="f">' + esc(t('photo')) + ' <span class="opt">' + esc(t('optional')) + '</span></label><div class="photo-pick">' +
+      '<label class="btn ghost sm" for="pmPhoto">' + esc(t('addPhoto')) + '</label><input type="file" id="pmPhoto" accept="image/*" capture="environment" class="hidden">' +
+      '<img id="pmPhotoPrev" class="hidden" alt=""></div><div id="pmErr" class="hidden"></div>' +
+      '<div style="margin-top:16px"><button class="btn" id="pmSubmit" type="submit">' + esc(t('pmSubmit')) + '</button></div></form>';
+
+    if (x.records && x.records.length) h += '<h3>' + esc(t('history')) + '</h3><div class="list">' + x.records.map(recCard).join('') + '</div>';
+    $('sheetBody').innerHTML = h;
+
+    var answers = {}, photo = '';
+    $('sheetBody').querySelectorAll('.seg').forEach(function (sg) {
+      sg.addEventListener('click', function (e) {
+        var b = e.target.closest('button[data-v]'); if (!b) return;
+        answers[sg.getAttribute('data-key')] = b.getAttribute('data-v');
+        sg.querySelectorAll('button').forEach(function (o) { o.className = o === b ? 'on ' + b.getAttribute('data-v') : ''; });
+      });
+    });
+    if ($('pmAllOk')) $('pmAllOk').addEventListener('click', function () {
+      $('sheetBody').querySelectorAll('.seg').forEach(function (sg) {
+        var k = sg.getAttribute('data-key');
+        if (answers[k]) return;
+        answers[k] = 'ok';
+        sg.querySelectorAll('button').forEach(function (o) { o.className = o.getAttribute('data-v') === 'ok' ? 'on ok' : ''; });
+      });
+    });
+    $('pmPhoto').addEventListener('change', function () {
+      var f = $('pmPhoto').files[0]; if (!f) return;
+      C.shrinkPhoto(f).then(function (d) { photo = d; $('pmPhotoPrev').src = d; $('pmPhotoPrev').classList.remove('hidden'); });
+    });
+    $('pmForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var results = Object.assign({}, answers);
+      $('sheetBody').querySelectorAll('[data-num]').forEach(function (i) { if (i.value.trim() !== '') results[i.getAttribute('data-num')] = i.value.trim(); });
+      $('sheetBody').querySelectorAll('[data-txt]').forEach(function (i) { if (i.value.trim() !== '') results[i.getAttribute('data-txt')] = i.value.trim(); });
+      var v = function (id) { return $(id) ? $(id).value.trim() : ''; };
+      $('pmSubmit').disabled = true; $('pmSubmit').textContent = t('sending');
+      C.api('pmComplete', { data: { taskId: x.id, results: results, meter: v('pmMeterIn'), remarks: v('pmRemarks'), contractor: v('pmContr'), cost: v('pmCost'), photo: photo } })
+        .then(function (r) {
+          var msg = '<div class="card center"><div style="font-size:40px">' + (r.notOk ? '⚠️' : '✅') + '</div><h2>' + esc(t('pmSaved')) + '</h2>' +
+            '<p class="muted">' + esc(r.recordId) + ' · ✓ ' + r.ok + (r.notOk ? ' · ✗ ' + r.notOk : '') + '</p>' +
+            (r.woId ? '<div class="msg err">' + esc(t('pmJobOpened').replace('{id}', r.woId)) + '</div><a class="btn dark" href="#wo=' + esc(r.woId) + '">' + esc(r.woId) + '</a>' : '') +
+            '<div class="btn-row"><a class="btn ghost" href="#rec=' + esc(r.recordId) + '">' + esc(t('pmViewRecord')) + '</a></div></div>';
+          $('sheetBody').innerHTML = msg; $('sheet').scrollTop = 0;
+        }).catch(function (err) {
+          handleErr(err, $('pmErr')); if ($('pmSubmit')) { $('pmSubmit').disabled = false; $('pmSubmit').textContent = t('pmSubmit'); }
+        });
+    });
+  }
+
+  /* printable ISO record */
+  function openRecord(id) {
+    openSheet(id, C.loadingHtml());
+    C.api('pmRecord', { id: id }).then(function (r) {
+      var sh = r.sheet, h = '<div class="iso-rec card">';
+      h += '<div class="iso-head"><div><b>TVS Lanka (Pvt.) Ltd</b><br><span class="muted small">QUALITY MANAGEMENT SYSTEM · Vehicle Assembly Complex – Horana</span></div>' +
+        '<div class="iso-doc">' + esc(sh ? sh.doc || '' : 'PM service record') + '</div></div>';
+      h += '<h2 style="margin:10px 0">' + esc(sh ? sh.title : r.title) + '</h2><dl class="kv">' + kv(t('pmRecordNo'), r.id) +
+        kv(t('machine'), r.assetId + ' — ' + r.assetName) + kv(t('location'), r.location) + kv(t('pmTask'), r.title) +
+        kv(t('pmDoneAt'), C.fmtDate(r.doneAt)) + kv(t('doneBy'), r.doneBy) + kv(t('pmMeterIn'), r.meter) +
+        kv(t('contractor'), r.contractor) + kv(t('cost'), r.cost === '' ? '' : Number(r.cost).toLocaleString()) + kv(t('pmRemarks'), r.remarks) +
+        (r.woId ? '<dt>' + esc(t('pmJob')) + '</dt><dd><a href="#wo=' + esc(r.woId) + '">' + esc(r.woId) + '</a></dd>' : '') + '</dl>';
+      var mark = function (v) { return v === 'ok' ? '<span class="res ok">✓</span>' : v === 'nok' ? '<span class="res nok">✗</span>' : v === 'na' ? '<span class="res na">N/A</span>' : esc(v === undefined ? '' : v); };
+      if (sh && sh.children && sh.children.length) {
+        var cols = sh.items.filter(function (i) { return i[3] === 'check'; });
+        h += '<div class="tbl-wrap"><table class="simple iso"><tr><th>Tool</th>' + cols.map(function (i) { return '<th>' + esc(i[2]) + '</th>'; }).join('') + '</tr>' +
+          sh.children.map(function (c) { return '<tr><td><b>' + esc(c) + '</b></td>' + cols.map(function (i) { return '<td>' + mark(sh.values[c + '|' + i[0]]) + '</td>'; }).join('') + '</tr>'; }).join('') + '</table></div>';
+      } else if (sh) {
+        h += '<div class="tbl-wrap"><table class="simple iso"><tr><th>#</th><th>' + esc(t('pmCheckItem')) + '</th><th>' + esc(t('pmResult')) + '</th></tr>' +
+          sh.items.map(function (i) { return '<tr><td>' + esc(i[0]) + '</td><td>' + esc(i[2]) + '</td><td>' + mark(sh.values[i[0]]) + (i[4] && sh.values[i[0]] !== undefined ? ' ' + esc(i[4]) : '') + '</td></tr>'; }).join('') + '</table></div>';
+      }
+      if (r.photoUrl) h += '<div class="photos" style="margin-top:12px"><a href="' + esc(r.photoUrl) + '" target="_blank" rel="noopener"><img src="' + esc(r.photoUrl) + '" alt=""></a></div>';
+      h += '<div class="iso-sign"><div>' + esc(t('pmCheckedBy')) + ': ' + esc(r.doneBy) + '</div><div>' + esc(t('pmReviewedBy')) + ': ______________</div></div></div>';
+      h += '<button class="btn dark no-print" type="button" id="recPrint">🖨 ' + esc(t('print')) + '</button>';
+      $('sheetBody').innerHTML = h;
+      $('recPrint').addEventListener('click', function () {
+        document.body.classList.add('printing-sheet');
+        window.print();
+        setTimeout(function () { document.body.classList.remove('printing-sheet'); }, 500);
+      });
+    }).catch(function (e) { if (e.auth) return handleErr(e); $('sheetBody').innerHTML = '<div class="msg err">' + esc(e.message) + '</div>'; });
+  }
+
+  /* task editor (admin / supervisor) */
+  function openPmEditor(arg) {
+    var m = /^\?asset=(.*)$/.exec(arg || '');
+    var id = m ? '' : arg, presetAsset = m ? decodeURIComponent(m[1]) : '';
+    openSheet(id ? t('a_edit') + ' ' + id : t('pmNewTask'), C.loadingHtml());
+    Promise.all([id ? C.api('pmTask', { id: id }) : Promise.resolve(null), S.templates ? Promise.resolve(S.templates) : C.api('templates')]).then(function (r) {
+      var x = r[0] || {}, tpls = S.templates = r[1];
+      var val = function (k, d) { return x[k] === undefined || x[k] === null ? (d || '') : x[k]; };
+      var users = [{ v: '', l: t('pmAnyone') }].concat(S.users.filter(function (u) { return u.role !== 'viewer'; }).map(function (u) { return { v: u.id, l: u.name }; }));
+      var h = '<div class="card">' +
+        field('pe_asset', t('machine') + ' *', '<input type="text" id="pe_asset" list="peAssets" autocomplete="off" value="' + esc(val('assetId', presetAsset)) + '"><datalist id="peAssets">' +
+          S.meta.assets.map(function (a) { return '<option value="' + esc(a.id) + '">' + esc(a.name) + '</option>'; }).join('') + '</datalist>') +
+        field('pe_title', t('pmTitle') + ' *', '<input type="text" id="pe_title" maxlength="120" value="' + esc(val('title')) + '">') +
+        field('pe_tpl', t('pmChecklist'), '<select id="pe_tpl">' + opts([{ v: '', l: t('pmNoChecklist') }].concat(tpls.map(function (tp) {
+          return { v: tp.id, l: (tp.docNo || tp.id) + ' · ' + tp.title + ' (' + tp.count + ')' }; })), val('templateId')) + '</select>') +
+        field('pe_scope', t('pmScope'), '<select id="pe_scope">' + opts(['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Half-yearly', 'Yearly', 'All'], val('scope', 'All')) + '</select>') +
+        '<div class="grid2"><div>' + field('pe_fv', t('pmEvery'), '<input type="number" id="pe_fv" min="1" value="' + esc(val('freqValue', 1)) + '">') + '</div><div>' +
+        field('pe_fu', ' ','<select id="pe_fu">' + opts([{ v: 'Day', l: t('u_day') }, { v: 'Week', l: t('u_week') }, { v: 'Month', l: t('u_month') }, { v: '', l: t('u_none') }], val('freqUnit', 'Month')) + '</select>') + '</div></div>' +
+        field('pe_mi', t('pmMeterInt'), '<input type="number" id="pe_mi" min="0" inputmode="numeric" value="' + esc(val('meterInterval')) + '">') +
+        field('pe_next', t('pmNext'), '<input type="date" id="pe_next" value="' + esc(C.toLocalInput(val('nextDue'), true)) + '">') +
+        field('pe_user', t('assignTo'), '<select id="pe_user">' + opts(users, val('assignedTo')) + '</select>') +
+        field('pe_by', t('doneBy'), '<input type="text" id="pe_by" list="peBy" value="' + esc(val('doneBy', 'Internal')) + '"><datalist id="peBy"><option value="Internal">' +
+          '<option value="Swedish Trading Co. (Pvt) Ltd"><option value="Singer"><option value="UTE"><option value="G.max Fire Service"></datalist>') +
+        field('pe_active', t('pmActive'), '<select id="pe_active">' + opts([{ v: 'Yes', l: t('yes') }, { v: 'No', l: t('no') }], x.id ? (x.active ? 'Yes' : 'No') : 'Yes') + '</select>') +
+        field('pe_notes', t('note'), '<textarea id="pe_notes" maxlength="1000" style="min-height:70px">' + esc(val('notes')) + '</textarea>') +
+        '<div id="peErr" class="hidden"></div><div style="margin-top:16px"><button class="btn dark" id="peSave" type="button">' + esc(t('save')) + '</button></div></div>';
+      $('sheetBody').innerHTML = h;
+      $('peSave').addEventListener('click', function () {
+        var v = function (k) { return $(k).value.trim(); };
+        var task = { TaskID: id || '', AssetID: v('pe_asset').split(' ')[0], Title: v('pe_title'), TemplateID: v('pe_tpl'), Scope: v('pe_scope'),
+          FreqValue: v('pe_fv'), FreqUnit: v('pe_fu'), MeterInterval: v('pe_mi'), NextDue: v('pe_next'), AssignedTo: v('pe_user'),
+          DoneBy: v('pe_by'), Active: v('pe_active'), Notes: v('pe_notes') };
+        $('peSave').disabled = true;
+        C.api('pmSave', { task: task }).then(function (r) { location.hash = 'pm=' + encodeURIComponent(r.id); })
+          .catch(function (e) { handleErr(e, $('peErr')); $('peSave').disabled = false; });
+      });
+    }).catch(function (e) { handleErr(e); });
   }
 
   /* ---------------- QR labels ---------------- */

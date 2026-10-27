@@ -17,7 +17,7 @@ var OLD_REQUESTS_SHEET_ID = '1RurjIrWvBDDJYh613ZRUf1kouJISIiU8t7kBObyNL_U'; // o
 var TABLES = {
   Assets: ['AssetID', 'Name', 'Area', 'Location', 'Category', 'ParentID', 'Make', 'Model', 'SerialNo', 'Year',
     'Specs', 'Criticality', 'Status', 'MaintainedBy', 'PMFrequency', 'ChecklistRef', 'CertRequired', 'CertExpiry',
-    'CertFileId', 'Notes', 'Created', 'Updated'],
+    'CertFileId', 'Notes', 'Created', 'Updated', 'Photo', 'MeterUnit', 'CurrentMeter', 'MeterUpdated'],
   WorkOrders: ['WO_ID', 'Created', 'RequesterName', 'RequesterEmail', 'RequesterPhone', 'Department', 'Location',
     'AssetID', 'AssetName', 'Category', 'Priority', 'Description', 'ProductionStopped', 'RequestPhoto', 'Status',
     'DueAt', 'ApprovedBy', 'ApprovedAt', 'AssignedTo', 'AssignedAt', 'StartedAt', 'CompletedAt', 'ClosedAt',
@@ -27,6 +27,12 @@ var TABLES = {
   WorkOrderLog: ['Timestamp', 'WO_ID', 'User', 'Action', 'FromStatus', 'ToStatus', 'Note'],
   Users: ['UserID', 'Name', 'Role', 'Email', 'Phone', 'Active', 'NewPIN', 'PinHash', 'TelegramChatID',
     'TelegramLinkCode', 'LastLogin'],
+  ChecklistItems: ['TemplateID', 'TemplateTitle', 'DocNo', 'ItemNo', 'Section', 'Text', 'TextSi', 'Type', 'Unit', 'Min',
+    'Max', 'Frequency', 'PerChild', 'Active'],
+  PMTasks: ['TaskID', 'AssetID', 'Title', 'TemplateID', 'Scope', 'FreqUnit', 'FreqValue', 'MeterInterval', 'NextDue',
+    'LastDone', 'LastMeter', 'AssignedTo', 'DoneBy', 'Active', 'Notes', 'Created', 'Updated'],
+  PMRecords: ['RecordID', 'TaskID', 'AssetID', 'TemplateID', 'Title', 'DoneAt', 'DoneBy', 'Meter', 'Results', 'OkCount',
+    'NotOkCount', 'Remarks', 'Contractor', 'Cost', 'Photo', 'WO_ID'],
   Settings: ['Key', 'Value', 'Description'],
   Errors: ['Timestamp', 'Action', 'Message', 'Stack']
 };
@@ -35,7 +41,10 @@ var TABLES = {
 var TEXT_COLUMNS = {
   Assets: ['AssetID', 'ParentID', 'SerialNo', 'Year', 'CertFileId'],
   WorkOrders: ['WO_ID', 'RequesterPhone', 'AssetID', 'ConfirmKey', 'OldJobID'],
-  Users: ['UserID', 'Phone', 'NewPIN', 'PinHash', 'TelegramChatID', 'TelegramLinkCode']
+  Users: ['UserID', 'Phone', 'NewPIN', 'PinHash', 'TelegramChatID', 'TelegramLinkCode'],
+  ChecklistItems: ['TemplateID', 'ItemNo'],
+  PMTasks: ['TaskID', 'AssetID', 'TemplateID', 'AssignedTo'],
+  PMRecords: ['RecordID', 'TaskID', 'AssetID', 'TemplateID', 'WO_ID']
 };
 
 var DEFAULT_SETTINGS = [
@@ -49,12 +58,16 @@ var DEFAULT_SETTINGS = [
   ['DEPARTMENTS', 'SKD Assembly,CKD,3W,Stores,Quality,Testing,Rectification,IT,Security,Admin / HR,Work Study,Maintenance,Other', 'Departments (comma separated)'],
   ['WORK_TYPES', 'Breakdown,Corrective,Facility,Improvement,Safety,Other', 'Work types (comma separated)'],
   ['FAILURE_CAUSES', 'Wear and tear,Lack of lubrication,Electrical fault,Pneumatic leak,Hydraulic fault,Operator error,Damage / accident,Design / installation,Unknown,Not a failure', 'Failure causes (comma separated)'],
-  ['NOTIFY_EMAILS', '', 'Extra emails copied on new requests (comma separated, optional)']
+  ['NOTIFY_EMAILS', '', 'Extra emails copied on new requests (comma separated, optional)'],
+  ['CERT_ALERT_DAYS', '60,30,7,1', 'Telegram alert this many days before an inspection certificate expires'],
+  ['PM_SOON_DAYS', '7', 'PM tasks due within this many days show as "coming up"']
 ];
 
 var PRIORITIES = ['Very Urgent', 'Urgent', 'General'];
 var OPEN_STATUSES = ['NEW', 'ASSIGNED', 'IN_PROGRESS', 'ON_HOLD', 'DONE'];
 var MANAGER_ROLES = ['admin', 'supervisor'];
+var TEAM_ROLES = ['admin', 'supervisor', 'technician'];
+var SCOPE_RANK = { Daily: 1, Weekly: 2, Monthly: 3, Quarterly: 4, 'Half-yearly': 5, Yearly: 6, All: 9 };
 var TOKEN_DAYS = 30;
 
 /* =========================================================================
@@ -99,7 +112,15 @@ var ROUTES = {
   dashboard: apiDashboard_,
   users: apiUsers_,
   telegramLinkStart: apiTelegramLinkStart_,
-  telegramLinkCheck: apiTelegramLinkCheck_
+  telegramLinkCheck: apiTelegramLinkCheck_,
+  assetRemove: apiAssetRemove_,
+  pmList: apiPmList_,
+  pmTask: apiPmTask_,
+  pmComplete: apiPmComplete_,
+  pmSave: apiPmSave_,
+  pmRecords: apiPmRecords_,
+  pmRecord: apiPmRecord_,
+  templates: apiTemplates_
 };
 
 /* =========================================================================
@@ -138,7 +159,8 @@ function apiAssetPublic_(p) {
   var out = {
     id: a.AssetID, name: a.Name, area: a.Area, location: a.Location, category: a.Category, parent: a.ParentID,
     make: a.Make, model: a.Model, serial: a.SerialNo, year: a.Year, specs: a.Specs, status: a.Status || 'Active',
-    certRequired: yes_(a.CertRequired), certExpiry: iso_(a.CertExpiry), certStatus: certStatus_(a)
+    certRequired: yes_(a.CertRequired), certExpiry: iso_(a.CertExpiry), certStatus: certStatus_(a),
+    photoUrl: photoUrl_(a.Photo)
   };
   if (a.ParentID) {
     var par = find_(t.rows, 'AssetID', String(a.ParentID));
@@ -156,7 +178,10 @@ function apiAssetPublic_(p) {
       jobs: readTable_('WorkOrders').rows
         .filter(function (w) { return String(w.AssetID) === String(a.AssetID); })
         .sort(function (x, y) { return dateNum_(y.Created) - dateNum_(x.Created); })
-        .slice(0, 30).map(jobSummary_)
+        .slice(0, 30).map(jobSummary_),
+      meter: a.MeterUnit ? { unit: a.MeterUnit, value: a.CurrentMeter, updated: iso_(a.MeterUpdated) } : null,
+      pm: readTable_('PMTasks').rows.filter(function (t) { return String(t.AssetID) === String(a.AssetID) && yes_(t.Active); })
+        .map(function (t) { return pmSummary_(t, a); })
     };
   }
   return out;
@@ -219,7 +244,7 @@ function apiCreateRequest_(p) {
   }
 
   var appUrl = s.APP_URL;
-  notifyRoles_(MANAGER_ROLES,
+  notifyRoles_(TEAM_ROLES,
     '🆕 <b>New request ' + wo.WO_ID + '</b> [' + esc_(pr) + ']\n' +
     (wo.AssetID ? '🔧 ' + esc_(wo.AssetID + ' – ' + wo.AssetName) + '\n' : '') +
     '📍 ' + esc_(loc) + '\n' + '👤 ' + esc_(name) + ' (' + esc_(dept) + ')\n' +
@@ -617,6 +642,7 @@ function apiAssetsList_(p) {
     TABLES.Assets.forEach(function (k) { o[k] = iso_(a[k]); });
     o.certStatus = certStatus_(a);
     o.openJobs = openCount[a.AssetID] || 0;
+    o.photoUrl = a.Photo ? 'https://drive.google.com/thumbnail?id=' + a.Photo + '&sz=w300' : '';
     return o;
   });
 }
@@ -628,16 +654,20 @@ function apiAssetSave_(p) {
   if (!/^[A-Z0-9][A-Z0-9\-_.]{1,29}$/.test(id)) throw userError_('Asset ID must be 2–30 letters, numbers or dashes.');
   if (!clean_(d.Name, 120)) throw userError_('Please enter the asset name.');
   var editable = ['Name', 'Area', 'Location', 'Category', 'ParentID', 'Make', 'Model', 'SerialNo', 'Year', 'Specs',
-    'Criticality', 'Status', 'MaintainedBy', 'PMFrequency', 'ChecklistRef', 'CertRequired', 'CertExpiry', 'CertFileId', 'Notes'];
+    'Criticality', 'Status', 'MaintainedBy', 'PMFrequency', 'ChecklistRef', 'CertRequired', 'CertExpiry', 'CertFileId', 'Notes',
+    'MeterUnit', 'CurrentMeter'];
   var ch = {};
   editable.forEach(function (k) {
     if (d[k] === undefined) return;
     if (k === 'CertExpiry') { ch[k] = d[k] ? parseLocal_(d[k]) || '' : ''; return; }
+    if (k === 'CurrentMeter') { ch[k] = num_(d[k]); if (ch[k] !== '') ch.MeterUpdated = new Date(); return; }
     if (k === 'ParentID') { ch[k] = cleanId_(d[k]); return; }
     if (k === 'CertFileId') { ch[k] = driveId_(d[k]); return; }
     ch[k] = clean_(d[k], k === 'Specs' || k === 'Notes' ? 3000 : 200);
   });
   if (ch.ParentID && ch.ParentID === id) throw userError_('An asset cannot be its own parent.');
+  if (p.photo) ch.Photo = savePhoto_(p.photo, 'ASSET_' + id);
+  if (p.removePhoto) ch.Photo = '';
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -657,6 +687,350 @@ function apiAssetSave_(p) {
     lock.releaseLock();
   }
   return { id: id, savedBy: u.Name };
+}
+
+/** Removes a machine. Machines with history (jobs / PM records) are marked "Disposed" so the history stays. */
+function apiAssetRemove_(p) {
+  var u = auth_(p, MANAGER_ROLES);
+  var id = cleanId_(p.id);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var t = readTable_('Assets', true);
+    var a = find_(t.rows, 'AssetID', id);
+    if (!a) throw userError_('Asset not found: ' + id);
+    var kids = t.rows.filter(function (c) { return String(c.ParentID).toUpperCase() === id && String(c.Status) !== 'Disposed'; });
+    if (kids.length) throw userError_('Remove or move its ' + kids.length + ' parts first (e.g. ' + kids[0].AssetID + ').');
+    var used = readTable_('WorkOrders').rows.some(function (w) { return String(w.AssetID).toUpperCase() === id; }) ||
+      readTable_('PMRecords').rows.some(function (r) { return String(r.AssetID).toUpperCase() === id; });
+    var tt = readTable_('PMTasks', true);
+    tt.rows.forEach(function (k) { if (String(k.AssetID).toUpperCase() === id && yes_(k.Active)) setCells_(tt, k, { Active: 'No', Updated: new Date() }); });
+    if (used) {
+      setCells_(t, a, { Status: 'Disposed', Updated: new Date(), Notes: clean_((a.Notes ? a.Notes + '\n' : '') + 'Removed by ' + u.Name + ' ' +
+        Utilities.formatDate(new Date(), TZ, 'dd MMM yyyy') + (p.reason ? ': ' + clean_(p.reason, 200) : ''), 3000) });
+      return { mode: 'disposed', id: id };
+    }
+    t.sheet.deleteRow(a._row);
+    delete TABLE_CACHE_.Assets;
+    return { mode: 'deleted', id: id };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* =========================================================================
+ * Preventive maintenance (Phase 2)
+ * ========================================================================= */
+
+function startOfDay_(d) {
+  return new Date(Utilities.formatDate(d || new Date(), TZ, "yyyy-MM-dd'T'00:00:00") + '+05:30');
+}
+
+/** Next due date: from + n days / weeks / months (Colombo calendar, start of day). */
+function addPeriod_(from, unit, value) {
+  var n = Number(value) || 1;
+  if (unit === 'Day') return startOfDay_(new Date(from.getTime() + n * 86400000));
+  if (unit === 'Week') return startOfDay_(new Date(from.getTime() + n * 7 * 86400000));
+  var p = Utilities.formatDate(from, TZ, 'yyyy-MM-dd').split('-').map(Number);
+  var m = p[1] - 1 + n, y = p[0] + Math.floor(m / 12);
+  m = ((m % 12) + 12) % 12;
+  var last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  var pad = function (x) { return ('0' + x).slice(-2); };
+  return new Date(y + '-' + pad(m + 1) + '-' + pad(Math.min(p[2], last)) + 'T00:00:00+05:30');
+}
+
+function freqText_(t) {
+  var n = Number(t.FreqValue) || 1, u = String(t.FreqUnit || '');
+  var txt = u ? (n === 1 ? { Day: 'Daily', Week: 'Weekly', Month: 'Monthly' }[u] : 'Every ' + n + ' ' + u.toLowerCase() + 's') : '';
+  if (u === 'Month' && n === 3) txt = 'Every 3 months';
+  if (t.MeterInterval) txt = (txt ? txt + ' or ' : 'Every ') + t.MeterInterval + ' h';
+  return txt || 'One-off';
+}
+
+function pmSummary_(t, a, soonDays) {
+  var today = startOfDay_().getTime(), tomorrow = today + 86400000;
+  var due = dateNum_(t.NextDue);
+  var state = !due ? 'unscheduled' : due < today ? 'overdue' : due < tomorrow ? 'today' : due < today + (soonDays || 7) * 86400000 ? 'soon' : 'ok';
+  var meterLeft = null;
+  if (t.MeterInterval && a && String(a.CurrentMeter) !== '' && String(t.LastMeter) !== '') {
+    meterLeft = Math.round((Number(t.LastMeter) + Number(t.MeterInterval) - Number(a.CurrentMeter)) * 10) / 10;
+    if (meterLeft <= 0 && state !== 'overdue') state = 'today';
+  }
+  return {
+    id: String(t.TaskID), assetId: t.AssetID, assetName: a ? a.Name : '', title: t.Title, templateId: t.TemplateID,
+    scope: t.Scope, freq: freqText_(t), nextDue: iso_(t.NextDue), lastDone: iso_(t.LastDone), state: state,
+    daysLate: due && due < today ? Math.round((today - due) / 86400000) : 0, meterLeft: meterLeft,
+    meterUnit: a ? a.MeterUnit : '', assignedTo: String(t.AssignedTo || ''), assignedName: userName_(t.AssignedTo),
+    doneBy: t.DoneBy || 'Internal', active: yes_(t.Active)
+  };
+}
+
+function assetMap_() {
+  var m = {};
+  readTable_('Assets').rows.forEach(function (a) { if (a.AssetID) m[String(a.AssetID).toUpperCase()] = a; });
+  return m;
+}
+
+function apiPmList_(p) {
+  var u = auth_(p);
+  var view = String(p.view || 'due');
+  var q = String(p.q || '').toLowerCase().trim();
+  var s = settings_(), amap = assetMap_();
+  var rank = { overdue: 0, today: 1, soon: 2, unscheduled: 3, ok: 4 };
+  var list = readTable_('PMTasks').rows.filter(function (t) { return t.TaskID && (view === 'inactive' ? !yes_(t.Active) : yes_(t.Active)); })
+    .map(function (t) { return pmSummary_(t, amap[String(t.AssetID).toUpperCase()], Number(s.PM_SOON_DAYS) || 7); })
+    .filter(function (x) {
+      if (view === 'due' && ['overdue', 'today'].indexOf(x.state) < 0) return false;
+      if (view === 'week' && ['overdue', 'today', 'soon'].indexOf(x.state) < 0) return false;
+      if (view === 'unscheduled' && x.state !== 'unscheduled') return false;
+      if (view === 'mine' && !(x.assignedTo === String(u.UserID) && ['overdue', 'today', 'soon'].indexOf(x.state) >= 0)) return false;
+      if (q && [x.id, x.assetId, x.assetName, x.title].join(' ').toLowerCase().indexOf(q) < 0) return false;
+      return true;
+    });
+  list.sort(function (a, b) { return (rank[a.state] - rank[b.state]) || (dateNum_(a.nextDue) - dateNum_(b.nextDue)) || String(a.assetId).localeCompare(String(b.assetId)); });
+  return { tasks: list.slice(0, 400), total: list.length };
+}
+
+/** Items of one checklist template, filtered by scope (Daily < Weekly < Monthly < Quarterly < Half-yearly < Yearly < All). */
+function templateInfo_(templateId, scope) {
+  if (!templateId) return null;
+  var rows = readTable_('ChecklistItems').rows.filter(function (r) {
+    return String(r.TemplateID).toUpperCase() === String(templateId).toUpperCase() && !/^(no|false|0)$/i.test(String(r.Active || 'Yes'));
+  });
+  if (!rows.length) return null;
+  var lim = SCOPE_RANK[scope] || SCOPE_RANK.All;
+  var items = rows.filter(function (r) { return !r.Frequency || (SCOPE_RANK[r.Frequency] || 1) <= lim; })
+    .sort(function (a, b) { return (parseFloat(a.ItemNo) || 0) - (parseFloat(b.ItemNo) || 0); })
+    .map(function (r) {
+      return { no: String(r.ItemNo), section: r.Section, text: r.Text, textSi: r.TextSi, type: String(r.Type || 'check').toLowerCase(),
+        unit: r.Unit, min: r.Min === '' ? null : Number(r.Min), max: r.Max === '' ? null : Number(r.Max), freq: r.Frequency };
+    });
+  return { id: rows[0].TemplateID, title: rows[0].TemplateTitle, docNo: rows[0].DocNo, perChild: rows.some(function (r) { return yes_(r.PerChild); }), items: items };
+}
+
+function apiPmTask_(p) {
+  auth_(p);
+  var t = find_(readTable_('PMTasks').rows, 'TaskID', String(p.id || ''));
+  if (!t) throw userError_('PM task not found.');
+  var amap = assetMap_(), a = amap[String(t.AssetID).toUpperCase()];
+  var out = pmSummary_(t, a);
+  out.notes = t.Notes; out.freqUnit = t.FreqUnit; out.freqValue = t.FreqValue; out.meterInterval = t.MeterInterval; out.lastMeter = t.LastMeter;
+  out.asset = a ? { id: a.AssetID, name: a.Name, location: a.Location, meterUnit: a.MeterUnit, currentMeter: a.CurrentMeter, photoUrl: photoUrl_(a.Photo) } : null;
+  out.template = templateInfo_(t.TemplateID, t.Scope);
+  if (out.template && out.template.perChild) {
+    out.children = readTable_('Assets').rows.filter(function (c) { return String(c.ParentID).toUpperCase() === String(t.AssetID).toUpperCase() && String(c.Status) !== 'Disposed'; })
+      .map(function (c) { return { id: c.AssetID, name: c.Name, location: c.Location }; });
+  }
+  out.records = readTable_('PMRecords').rows.filter(function (r) { return String(r.TaskID) === String(t.TaskID); })
+    .sort(function (x, y) { return dateNum_(y.DoneAt) - dateNum_(x.DoneAt); }).slice(0, 10).map(recordSummary_);
+  return out;
+}
+
+function recordSummary_(r) {
+  return { id: r.RecordID, taskId: r.TaskID, assetId: r.AssetID, title: r.Title, doneAt: iso_(r.DoneAt), doneBy: r.DoneBy,
+    meter: r.Meter, okCount: r.OkCount, notOkCount: r.NotOkCount, woId: r.WO_ID, contractor: r.Contractor };
+}
+
+/** Saves a filled checklist (or a contractor service record), moves the task to its next due date, and opens a job for Not OK items. */
+function apiPmComplete_(p) {
+  var u = auth_(p);
+  var d = p.data || {};
+  var now = new Date();
+  var s = settings_();
+  var lock = LockService.getScriptLock();
+  lock.waitLock(25000);
+  var rec, wo = null, taskTitle, asset;
+  try {
+    var tt = readTable_('PMTasks', true);
+    var t = find_(tt.rows, 'TaskID', String(d.taskId || ''));
+    if (!t || !yes_(t.Active)) throw userError_('PM task not found or not active.');
+    var at = readTable_('Assets', true);
+    asset = find_(at.rows, 'AssetID', String(t.AssetID));
+    taskTitle = t.Title;
+    var tpl = templateInfo_(t.TemplateID, t.Scope);
+    var children = [];
+    if (tpl && tpl.perChild) {
+      children = at.rows.filter(function (c) { return String(c.ParentID).toUpperCase() === String(t.AssetID).toUpperCase() && String(c.Status) !== 'Disposed'; })
+        .map(function (c) { return c.AssetID; });
+    }
+    var results = d.results || {};
+    var values = {}, notOk = [], ok = 0, missing = 0;
+    var check = function (it, child) {
+      var key = (child ? child + '|' : '') + it.no;
+      var v = results[key];
+      var label = (child ? child + ': ' : '') + it.text;
+      if (it.type === 'number') {
+        if (v === undefined || v === null || String(v).trim() === '') { missing++; return; }
+        var n = Number(String(v).replace(/,/g, ''));
+        if (!isFinite(n)) throw userError_('Not a number: ' + it.text);
+        values[key] = n;
+        if ((it.min !== null && n < it.min) || (it.max !== null && n > it.max)) notOk.push(label + ' = ' + n + (it.unit ? ' ' + it.unit : '') + ' (out of range)');
+        else ok++;
+      } else if (it.type === 'text') {
+        if (v) values[key] = clean_(v, 300);
+      } else {
+        if (['ok', 'nok', 'na'].indexOf(v) < 0) { missing++; return; }
+        values[key] = v;
+        if (v === 'nok') notOk.push(label); else if (v === 'ok') ok++;
+      }
+    };
+    if (tpl) {
+      tpl.items.forEach(function (it) {
+        if (children.length) children.forEach(function (c) { check(it, c); }); else check(it, null);
+      });
+      if (missing) throw userError_('Please answer all items (' + missing + ' not answered).');
+    }
+    var remarks = clean_(d.remarks, 1000);
+    var contractor = clean_(d.contractor, 100);
+    if (!tpl && !remarks && !contractor) throw userError_('Please write what was done (or the contractor name).');
+    var meter = num_(d.meter);
+    if (meter !== '' && asset && String(asset.CurrentMeter) !== '' && meter < Number(asset.CurrentMeter)) {
+      throw userError_('Meter reading is lower than the last reading (' + asset.CurrentMeter + ').');
+    }
+    if (asset && asset.MeterUnit && t.MeterInterval && meter === '') throw userError_('Please enter the hour meter reading.');
+
+    var rt = readTable_('PMRecords', true);
+    var prefix = 'PM-' + Utilities.formatDate(now, TZ, 'yyMMdd') + '-';
+    var seq = rt.rows.filter(function (r) { return String(r.RecordID).indexOf(prefix) === 0; }).length + 1;
+    rec = {
+      RecordID: prefix + ('00' + seq).slice(-3), TaskID: t.TaskID, AssetID: t.AssetID, TemplateID: t.TemplateID || '', Title: t.Title,
+      DoneAt: now, DoneBy: u.Name, Meter: meter, OkCount: ok, NotOkCount: notOk.length, Remarks: remarks, Contractor: contractor,
+      Cost: num_(d.cost),
+      Results: tpl ? JSON.stringify({ doc: tpl.docNo, title: tpl.title, items: tpl.items.map(function (i) { return [i.no, i.section || '', i.text, i.type, i.unit || '']; }),
+        children: children, values: values }) : ''
+    };
+
+    if (notOk.length) {
+      var wt = readTable_('WorkOrders', true);
+      var crit = asset && /^A$/i.test(String(asset.Criticality));
+      var pr = crit ? 'Urgent' : 'General';
+      wo = {
+        WO_ID: nextWoId_(wt.rows, now), Created: now, RequesterName: u.Name, RequesterEmail: '', Department: 'Maintenance',
+        Location: asset ? asset.Location : '', AssetID: t.AssetID, AssetName: asset ? asset.Name : '', Category: 'General Maintenance',
+        Priority: pr, Description: 'Not OK in PM check ' + rec.RecordID + ' (' + t.Title + '):\n• ' + notOk.slice(0, 40).join('\n• ') +
+          (remarks ? '\nRemarks: ' + remarks : ''), ProductionStopped: 'No', Status: 'NEW', WorkType: 'Corrective',
+        DueAt: new Date(now.getTime() + targetHours_(pr, s) * 3600000), ConfirmKey: Utilities.getUuid().replace(/-/g, '').slice(0, 16),
+        Updated: now, Source: 'PM'
+      };
+      appendObj_('WorkOrders', wo);
+      addLog_(wo.WO_ID, u.Name, 'Created from PM check', '', 'NEW', rec.RecordID);
+      rec.WO_ID = wo.WO_ID;
+    }
+    appendObj_('PMRecords', rec);
+
+    var ch = { LastDone: now, Updated: now };
+    if (t.FreqUnit) ch.NextDue = addPeriod_(now, t.FreqUnit, t.FreqValue);
+    if (meter !== '' && t.MeterInterval) ch.LastMeter = meter;
+    setCells_(tt, t, ch);
+    if (meter !== '' && asset) setCells_(at, asset, { CurrentMeter: meter, MeterUpdated: now });
+  } finally {
+    lock.releaseLock();
+  }
+  if (d.photo) {
+    try {
+      var fid = savePhoto_(d.photo, rec.RecordID);
+      var rt2 = readTable_('PMRecords', true);
+      setCells_(rt2, find_(rt2.rows, 'RecordID', rec.RecordID), { Photo: fid });
+    } catch (err) { logError_('pmComplete.photo', err); }
+  }
+  if (wo) {
+    notifyRoles_(TEAM_ROLES, '⚠️ <b>' + wo.WO_ID + ' – Not OK in PM check</b> [' + esc_(wo.Priority) + ']\n🔧 ' + esc_(wo.AssetID + ' – ' + wo.AssetName) +
+      '\n👷 ' + esc_(u.Name) + '\n📝 ' + esc_(short_(wo.Description, 500)) + '\n\n' + s.APP_URL + 'app.html#wo=' + wo.WO_ID);
+  }
+  return { recordId: rec.RecordID, woId: wo ? wo.WO_ID : '', notOk: rec.NotOkCount, ok: rec.OkCount };
+}
+
+function apiPmSave_(p) {
+  var u = auth_(p, MANAGER_ROLES);
+  var d = p.task || {};
+  var aid = cleanId_(d.AssetID);
+  if (!find_(readTable_('Assets').rows, 'AssetID', aid)) throw userError_('Machine not found: ' + aid);
+  var title = clean_(d.Title, 120);
+  if (!title) throw userError_('Please enter the task title.');
+  var tplId = clean_(d.TemplateID, 40);
+  if (tplId && !templateInfo_(tplId, 'All')) throw userError_('Checklist not found: ' + tplId);
+  var scope = SCOPE_RANK[d.Scope] ? d.Scope : 'All';
+  var unit = ['Day', 'Week', 'Month'].indexOf(d.FreqUnit) >= 0 ? d.FreqUnit : '';
+  var ch = {
+    AssetID: aid, Title: title, TemplateID: tplId, Scope: scope, FreqUnit: unit, FreqValue: unit ? (num_(d.FreqValue) || 1) : '',
+    MeterInterval: num_(d.MeterInterval), NextDue: d.NextDue ? (parseLocal_(d.NextDue) || '') : '',
+    AssignedTo: clean_(d.AssignedTo, 20), DoneBy: clean_(d.DoneBy, 100) || 'Internal',
+    Active: /^(no|false|0)$/i.test(String(d.Active || 'Yes')) ? 'No' : 'Yes', Notes: clean_(d.Notes, 1000), Updated: new Date()
+  };
+  if (ch.AssignedTo && !find_(readTable_('Users').rows, 'UserID', ch.AssignedTo)) throw userError_('User not found.');
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var t = readTable_('PMTasks', true);
+    var row = d.TaskID ? find_(t.rows, 'TaskID', String(d.TaskID)) : null;
+    if (d.TaskID && !row) throw userError_('PM task not found.');
+    if (row) { setCells_(t, row, ch); return { id: String(row.TaskID), savedBy: u.Name }; }
+    var max = 0;
+    t.rows.forEach(function (r) { var m = /^T(\d+)$/.exec(String(r.TaskID)); if (m) max = Math.max(max, Number(m[1])); });
+    ch.TaskID = 'T' + ('000' + (max + 1)).slice(-4);
+    ch.Created = ch.Updated;
+    appendObj_('PMTasks', ch);
+    return { id: ch.TaskID, savedBy: u.Name };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function apiPmRecords_(p) {
+  auth_(p);
+  var aid = cleanId_(p.assetId), tid = String(p.taskId || '');
+  return readTable_('PMRecords').rows.filter(function (r) {
+    return r.RecordID && (!aid || String(r.AssetID).toUpperCase() === aid) && (!tid || String(r.TaskID) === tid);
+  }).sort(function (x, y) { return dateNum_(y.DoneAt) - dateNum_(x.DoneAt); }).slice(0, 200).map(recordSummary_);
+}
+
+function apiPmRecord_(p) {
+  auth_(p);
+  var r = find_(readTable_('PMRecords').rows, 'RecordID', String(p.id || ''));
+  if (!r) throw userError_('Record not found.');
+  var out = recordSummary_(r);
+  out.remarks = r.Remarks; out.cost = r.Cost; out.templateId = r.TemplateID;
+  out.photoUrl = photoUrl_(r.Photo);
+  var a = find_(readTable_('Assets').rows, 'AssetID', String(r.AssetID));
+  out.assetName = a ? a.Name : '';
+  out.location = a ? a.Location : '';
+  try { out.sheet = r.Results ? JSON.parse(r.Results) : null; } catch (e) { out.sheet = null; }
+  return out;
+}
+
+function apiTemplates_(p) {
+  auth_(p);
+  var m = {};
+  readTable_('ChecklistItems').rows.forEach(function (r) {
+    if (!r.TemplateID) return;
+    var k = String(r.TemplateID);
+    if (!m[k]) m[k] = { id: k, title: r.TemplateTitle, docNo: r.DocNo, perChild: false, count: 0 };
+    m[k].count++;
+    if (yes_(r.PerChild)) m[k].perChild = true;
+  });
+  return Object.keys(m).sort().map(function (k) { return m[k]; });
+}
+
+/** Certificates that crossed an alert threshold (60/30/7/1 days, then expired) since the last alert. */
+function certAlerts_(assets, s) {
+  var props = PropertiesService.getScriptProperties();
+  var th = list_(s.CERT_ALERT_DAYS).map(Number).filter(function (x) { return x > 0; }).sort(function (a, b) { return a - b; });
+  var today = startOfDay_().getTime();
+  var lines = [];
+  assets.forEach(function (a) {
+    if (!a.AssetID || !a.CertExpiry || String(a.Status) === 'Disposed') return;
+    var exp = dateNum_(a.CertExpiry);
+    var days = Math.round((exp - today) / 86400000);
+    var level = days <= 0 ? 0 : th.filter(function (x) { return days <= x; })[0];
+    if (level === undefined) return;
+    var key = 'certalert_' + a.AssetID + '_' + level;
+    var stamp = String(exp);
+    if (props.getProperty(key) === stamp) return;
+    props.setProperty(key, stamp);
+    lines.push((days <= 0 ? '🔴 EXPIRED ' : '🟠 ' + days + ' days – ') + esc_(a.AssetID + ' ' + a.Name) + ' (' +
+      Utilities.formatDate(new Date(exp), TZ, 'dd MMM yyyy') + ')');
+  });
+  return lines;
 }
 
 /* =========================================================================
@@ -708,8 +1082,17 @@ function apiDashboard_(p) {
     .map(function (a) { return { id: a.AssetID, name: a.Name, expiry: iso_(a.CertExpiry), status: certStatus_(a) }; })
     .filter(function (c) { return c.status !== 'valid'; })
     .sort(function (a, b) { return dateNum_(a.expiry) - dateNum_(b.expiry); });
+  var amap = assetMap_();
+  var pmTasks = readTable_('PMTasks').rows.filter(function (t) { return t.TaskID && yes_(t.Active); })
+    .map(function (t) { return pmSummary_(t, amap[String(t.AssetID).toUpperCase()]); });
+  k.pmOverdue = pmTasks.filter(function (x) { return x.state === 'overdue'; }).length;
+  k.pmToday = pmTasks.filter(function (x) { return x.state === 'today'; }).length;
+  k.pmDoneMonth = readTable_('PMRecords').rows.filter(function (r) { return dateNum_(r.DoneAt) >= monthStart.getTime(); }).length;
+  k.pmCompliance = (k.pmDoneMonth + k.pmOverdue) ? Math.round(k.pmDoneMonth / (k.pmDoneMonth + k.pmOverdue) * 100) : null;
   return {
     kpi: k,
+    pmDue: pmTasks.filter(function (x) { return x.state === 'overdue' || x.state === 'today'; })
+      .sort(function (a, b) { return b.daysLate - a.daysLate; }).slice(0, 20),
     overdue: overdueList.sort(function (a, b) { return dateNum_(a.dueAt) - dateNum_(b.dueAt); }).slice(0, 20),
     perPerson: Object.keys(perPerson).map(function (n) { return { name: n, count: perPerson[n] }; })
       .sort(function (a, b) { return b.count - a.count; }),
@@ -832,7 +1215,10 @@ function hourlyTick() {
   });
 }
 
-/** Every morning ~07:30: summary to admin + supervisor. */
+/**
+ * Every morning ~07:30 (not Sunday): a personal Telegram summary for each team member –
+ * their jobs, PM checks due / overdue, and (for admin + supervisor) totals and certificate alerts.
+ */
 function dailyDigest() {
   TABLE_CACHE_ = {};
   var now = new Date();
@@ -844,17 +1230,56 @@ function dailyDigest() {
   var y = now.getTime() - 86400000;
   var newY = wos.filter(function (w) { return dateNum_(w.Created) >= y; }).length;
   var doneY = wos.filter(function (w) { return dateNum_(w.CompletedAt) >= y; }).length;
-  var lines = ['☀️ <b>Maintenance – ' + Utilities.formatDate(now, TZ, 'dd MMM yyyy') + '</b>',
-    'Open jobs: <b>' + open.length + '</b> (new ' + open.filter(function (w) { return w.Status === 'NEW'; }).length +
-    ', on hold ' + open.filter(function (w) { return w.Status === 'ON_HOLD'; }).length + ')',
-    'Overdue: <b>' + overdue.length + '</b>',
-    'Last 24 h: ' + newY + ' new, ' + doneY + ' completed',
-    'Waiting requester confirmation: ' + wos.filter(function (w) { return w.Status === 'DONE'; }).length];
-  overdue.slice(0, 10).forEach(function (w) {
-    lines.push('• ' + w.WO_ID + ' ' + esc_(short_(w.Location, 40)) + ' – ' + esc_(userName_(w.AssignedTo) || 'not assigned'));
+  var assets = readTable_('Assets').rows;
+  var amap = assetMap_();
+  var pm = readTable_('PMTasks').rows.filter(function (t) { return t.TaskID && yes_(t.Active); })
+    .map(function (t) { return pmSummary_(t, amap[String(t.AssetID).toUpperCase()]); })
+    .filter(function (x) { return x.state === 'overdue' || x.state === 'today'; })
+    .sort(function (a, b) { return b.daysLate - a.daysLate; });
+  var certLines = certAlerts_(assets, s);
+  var pmLine = function (x) {
+    return '• ' + esc_(x.assetId + ' ' + short_(x.title, 40)) + (x.state === 'overdue' ? ' – <b>' + x.daysLate + ' d late</b>' : ' – today') +
+      (x.meterLeft !== null && x.meterLeft <= 0 ? ' (hours reached)' : '');
+  };
+  var head = '☀️ <b>Maintenance – ' + Utilities.formatDate(now, TZ, 'EEE dd MMM yyyy') + '</b>';
+
+  readTable_('Users').rows.forEach(function (u) {
+    if (!isActive_(u) || !u.TelegramChatID) return;
+    var role = String(u.Role || '').toLowerCase();
+    if (TEAM_ROLES.indexOf(role) < 0) return;
+    var mgr = MANAGER_ROLES.indexOf(role) >= 0;
+    var mine = open.filter(function (w) { return String(w.AssignedTo) === String(u.UserID); });
+    var lines = [head, ''];
+    if (mgr) {
+      lines.push('Open jobs: <b>' + open.length + '</b> (new ' + open.filter(function (w) { return w.Status === 'NEW'; }).length +
+        ', on hold ' + open.filter(function (w) { return w.Status === 'ON_HOLD'; }).length + ') · overdue <b>' + overdue.length + '</b>',
+        'Last 24 h: ' + newY + ' new, ' + doneY + ' completed');
+      overdue.slice(0, 8).forEach(function (w) {
+        lines.push('• ' + w.WO_ID + ' ' + esc_(short_(w.Location, 35)) + ' – ' + esc_(userName_(w.AssignedTo) || 'not assigned'));
+      });
+    }
+    if (mine.length) {
+      lines.push('', '👷 <b>Your jobs (' + mine.length + ')</b>');
+      mine.slice(0, 10).forEach(function (w) {
+        var late = w.DueAt && dateNum_(w.DueAt) < now.getTime();
+        lines.push('• ' + w.WO_ID + ' ' + esc_(short_(w.AssetName || w.Location, 35)) + (late ? ' – <b>overdue</b>' : ''));
+      });
+    }
+    var myPm = mgr ? pm : pm.filter(function (x) { return !x.assignedTo || x.assignedTo === String(u.UserID); });
+    if (myPm.length) {
+      lines.push('', '🗓 <b>PM checks due (' + myPm.length + ')</b>');
+      myPm.slice(0, 15).forEach(function (x) { lines.push(pmLine(x)); });
+      if (myPm.length > 15) lines.push('… and ' + (myPm.length - 15) + ' more');
+    } else {
+      lines.push('', '🗓 No PM checks due today.');
+    }
+    if (mgr && certLines.length) {
+      lines.push('', '📄 <b>Inspection certificates</b>');
+      certLines.forEach(function (l) { lines.push(l); });
+    }
+    lines.push('', s.APP_URL + 'app.html');
+    tgSend_(u.TelegramChatID, short_(lines.join('\n'), 4000));
   });
-  lines.push('', s.APP_URL + 'app.html');
-  notifyRoles_(MANAGER_ROLES, lines.join('\n'));
 }
 
 /* =========================================================================
@@ -1157,7 +1582,12 @@ function driveId_(v) {
   return m ? m[1] : s;
 }
 
-function num_(v) { var n = Number(String(v === undefined || v === null ? '' : v).replace(/,/g, '')); return isFinite(n) && String(v).trim() !== '' ? n : ''; }
+function num_(v) {
+  var s = String(v === undefined || v === null ? '' : v).replace(/,/g, '').trim();
+  if (s === '') return '';
+  var n = Number(s);
+  return isFinite(n) ? n : '';
+}
 
 function list_(v) { return String(v || '').split(',').map(function (x) { return x.trim(); }).filter(String); }
 

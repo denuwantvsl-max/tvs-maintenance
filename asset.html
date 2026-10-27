@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Sinhala:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <header class="top">
@@ -27,7 +27,7 @@
 <main class="wrap" id="out"></main>
 
 <script src="config.js?v=2"></script>
-<script src="common.js?v=2"></script>
+<script src="common.js?v=4"></script>
 <script>
 (function () {
   'use strict';
@@ -38,6 +38,8 @@
 
   function render() {
     var h = '';
+    if (a.photoUrl) h += '<div class="card" style="padding:0;overflow:hidden"><img src="' + C.esc(a.photoUrl) + '" alt="' + C.esc(a.name) +
+      '" style="display:block;width:100%;max-height:300px;object-fit:cover"></div>';
     h += '<div class="card"><div class="muted small">' + C.esc(a.area || '') + '</div>' +
       '<div style="font-size:28px;font-weight:800;letter-spacing:.5px">' + C.esc(a.id) + '</div>' +
       '<div style="font-size:18px;font-weight:600">' + C.esc(a.name) + '</div>' +
@@ -73,7 +75,17 @@
         (s.pmFrequency ? '<dt>PM frequency</dt><dd>' + C.esc(s.pmFrequency) + '</dd>' : '') +
         (s.checklistRef ? '<dt>Checklist</dt><dd>' + C.esc(s.checklistRef) + '</dd>' : '') +
         (s.criticality ? '<dt>Criticality</dt><dd>' + C.esc(s.criticality) + '</dd>' : '') +
+        (s.meter ? '<dt>Hour meter</dt><dd>' + C.esc(s.meter.value === '' ? '—' : s.meter.value + ' ' + s.meter.unit) +
+          (s.meter.updated ? ' <span class="muted small">(' + C.esc(C.fmtDate(s.meter.updated)) + ')</span>' : '') + '</dd>' : '') +
         (s.notes ? '<dt>Notes</dt><dd class="specs">' + C.esc(s.notes) + '</dd>' : '') + '</dl>';
+      if (s.pm && s.pm.length) {
+        h += '<h3>PM tasks (' + s.pm.length + ')</h3><div class="list">' + s.pm.map(function (x) {
+          var st = { overdue: '<span class="pill badge-late">' + x.daysLate + ' d late</span>', today: '<span class="pill st-IN_PROGRESS">Due today</span>',
+            unscheduled: '<span class="pill st-REJECTED">No date</span>' }[x.state] || '<span class="pill st-CLOSED">' + C.esc(C.fmtDate(x.nextDue, false)) + '</span>';
+          return '<a class="item ' + ({ overdue: 'p0', today: 'p1' }[x.state] || 'p2') + '" href="app.html#pm=' + encodeURIComponent(x.id) + '"><div class="top"><span class="id">' +
+            C.esc(x.title) + '</span>' + st + '</div><div class="meta">🔁 ' + C.esc(x.freq) + '</div></a>';
+        }).join('') + '</div>';
+      }
       h += '<h3>Job history (' + s.jobs.length + ')</h3>';
       h += s.jobs.length ? '<div class="list">' + s.jobs.map(function (j) {
         return '<a class="item ' + C.prioClass(j.priority) + '" href="app.html#wo=' + encodeURIComponent(j.id) + '"><div class="top"><span class="id">' +

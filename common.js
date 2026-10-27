@@ -146,7 +146,7 @@
 
   function loadScript(src) {
     return new Promise(function (res, rej) {
-      var s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = function () { rej(new Error('load ' + src)); };
+      var s = document.createElement('script'); s.src = src + (src.indexOf('dev/') === 0 ? '?t=' + Date.now() : ''); s.onload = res; s.onerror = function () { rej(new Error('load ' + src)); };
       document.head.appendChild(s);
     });
   }

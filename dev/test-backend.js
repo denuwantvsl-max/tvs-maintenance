@@ -103,7 +103,7 @@ assert.strictEqual(wo.RequesterPhone, '0771234567');
 assert.ok(wo.RequestPhoto && wo.DowntimeStart instanceof Date);
 assert.strictEqual(Math.round((wo.DueAt - wo.Created) / 3600000), 4);
 assert.ok(F.telegram.some(t => t.method === 'sendMessage' && t.payload.chat_id === '111' && /New request/.test(t.payload.text)));
-assert.ok(!F.telegram.some(t => t.payload.chat_id === '333'), 'technician not alerted for NEW');
+assert.ok(F.telegram.some(t => t.payload.chat_id === '333' && /New request/.test(t.payload.text)), 'technician alerted for NEW too');
 assert.ok(F.mails.some(m => m.to === 'shantha@example.com'));
 
 // ---- track ----

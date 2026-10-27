@@ -19,13 +19,24 @@
     return true;
   }
   window.CMMS_MOCK_BOOT = function () {
-    return fetch('backend/Code.gs').then(function (r) { return r.text(); }).then(function (code) {
+    return fetch('backend/Code.gs?t=' + Date.now()).then(function (r) { return r.text(); }).then(function (code) {
       (0, eval)(code);
       if (!load()) {
         window.FAKE_GAS.active.sheets = [];
         window.FAKE_GAS.active.insertSheet('Sheet1');
         setup();
         DEMO_DATA.assets.forEach(function (a) { appendObj_('Assets', a); });
+        DEMO_DATA.checklist.forEach(function (r) {
+          var o = {}; TABLES.ChecklistItems.forEach(function (k, i) { o[k] = r[i] === undefined ? '' : r[i]; }); appendObj_('ChecklistItems', o);
+        });
+        DEMO_DATA.tasks.forEach(function (t) {
+          var o = Object.assign({}, t); delete o.due;
+          if (t.due !== null) o.NextDue = new Date(startOfDay_().getTime() + t.due * 86400000);
+          appendObj_('PMTasks', o);
+        });
+        var at = readTable_('Assets', true);
+        setCells_(at, find_(at.rows, 'AssetID', 'EN-CA-01'), { MeterUnit: 'h', CurrentMeter: 2985 });
+        setCells_(at, find_(at.rows, 'AssetID', 'ST-MM-01'), { MeterUnit: 'h', CurrentMeter: 4410 });
         var ut = readTable_('Users', true);
         ut.rows.forEach(function (u) { setCells_(ut, u, { NewPIN: DEMO_DATA.pins[u.UserID] }); });
         window.FAKE_GAS.props.TELEGRAM_BOT_TOKEN = 'fake';
