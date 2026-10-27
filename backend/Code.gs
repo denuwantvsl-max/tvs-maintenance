@@ -980,6 +980,15 @@ function sendTelegramTest() {
   notifyRoles_(MANAGER_ROLES, '🔔 Test message from TVS Horana CMMS – ' + Utilities.formatDate(new Date(), TZ, 'dd MMM yyyy HH:mm'));
 }
 
+/** Checks the bot token (logs only the bot name, never the token) and lists who has connected Telegram. */
+function checkTelegram() {
+  var me = tgCall_('getMe', {});
+  if (!me) { Logger.log('TELEGRAM_BOT_TOKEN is not set in Script Properties.'); return; }
+  Logger.log(me.ok ? 'Bot OK: @' + me.result.username + ' (' + me.result.first_name + ')' : 'Bot token NOT working: ' + me.description);
+  var linked = readTable_('Users').rows.filter(function (u) { return u.TelegramChatID; }).map(function (u) { return u.Name; });
+  Logger.log('Telegram connected: ' + (linked.join(', ') || 'nobody yet'));
+}
+
 /* =========================================================================
  * Sheet helpers
  * ========================================================================= */
