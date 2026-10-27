@@ -532,6 +532,7 @@
     box.innerHTML = C.loadingHtml();
     C.api('telegramLinkStart').then(function (r) {
       box.innerHTML = '<p>' + esc(t('tgStep1')) + '</p><a class="btn" href="' + esc(r.url) + '" target="_blank" rel="noopener">' + esc(t('tgOpen')) + ' (@' + esc(r.bot) + ')</a>' +
+        '<div class="msg info">' + esc(t('tgManual')) + '<br><b>@' + esc(r.bot) + '</b> → START → <b style="font-size:20px;letter-spacing:2px">' + esc(r.code) + '</b></div>' +
         '<p>' + esc(t('tgStep2')) + '</p><div id="tgErr" class="hidden"></div><button class="btn dark" id="tgCheck" type="button">' + esc(t('tgCheck')) + '</button>';
       $('tgCheck').addEventListener('click', function () {
         $('tgCheck').disabled = true;
