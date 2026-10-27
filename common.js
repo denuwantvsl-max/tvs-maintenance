@@ -18,6 +18,8 @@
     plant: ['TVS Lanka · Horana Assembly Plant', 'TVS ලංකා · හොරණ එකලස් කිරීමේ කම්හල'],
     appName: ['Maintenance', 'නඩත්තු'],
     home: ['Home', 'මුල් පිටුව'],
+    homeTitle: ['How can we help?', 'අපට ඔබට උදව් කළ හැක්කේ කෙසේද?'],
+    homeLead: ['Report a breakdown, follow a job, or manage maintenance work.', 'බිඳවැටීමක් වාර්තා කරන්න, රැකියාවක් පසුවිපරම් කරන්න, හෝ නඩත්තු වැඩ කළමනාකරණය කරන්න.'],
     reportTitle: ['Report a problem', 'ගැටලුවක් වාර්තා කරන්න'],
     reportSub: ['Machine breakdown, electrical, plumbing, building…', 'යන්ත්‍ර බිඳවැටීම්, විදුලි, ජල නල, ගොඩනැගිලි…'],
     trackTitle: ['Check my request', 'මගේ ඉල්ලීම පරීක්ෂා කරන්න'],
