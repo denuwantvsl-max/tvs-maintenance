@@ -144,7 +144,7 @@
   Spreadsheet.prototype.setSpreadsheetTimeZone = function () {};
   Spreadsheet.prototype.getId = function () { return this.id; };
 
-  var FAKE = { active: new Spreadsheet('ACTIVE'), others: {}, props: {}, cache: {}, mails: [], telegram: [], tgUpdates: [],
+  var FAKE = { active: new Spreadsheet('ACTIVE'), others: {}, props: {}, cache: {}, mails: [], telegram: [], tgUpdates: [], geminiCalls: [], gemini: null,
     files: {}, triggers: [], now: null };
 
   /* ---------- Date formatting (Asia/Colombo = UTC+05:30, no DST) ---------- */
@@ -189,7 +189,8 @@
       put: function (k, v, sec) { FAKE.cache[k] = { v: String(v), exp: Date.now() + (sec || 600) * 1000 }; },
       remove: function (k) { delete FAKE.cache[k]; } };
   } };
-  G.LockService = { getScriptLock: function () { return { waitLock: function () {}, tryLock: function () { return true; }, releaseLock: function () {} }; } };
+  var fakeLock = function () { return { waitLock: function () {}, tryLock: function () { return true; }, releaseLock: function () {} }; };
+  G.LockService = { getScriptLock: fakeLock, getUserLock: fakeLock };
   G.Utilities = {
     DigestAlgorithm: { SHA_256: 'SHA_256' }, Charset: { UTF_8: 'UTF_8' },
     getUuid: function () {
@@ -202,6 +203,7 @@
     base64EncodeWebSafe: function (v) { return b64(toBytes(v)).replace(/\+/g, '-').replace(/\//g, '_'); },
     base64DecodeWebSafe: function (s) { return unb64(s); },
     base64Decode: function (s) { return unb64(s); },
+    base64Encode: function (v) { return b64(toBytes(v)); },
     newBlob: function (bytes, type, name) { return new Blob(bytes, type, name); },
     formatDate: formatDate,
     sleep: function () {}
@@ -214,9 +216,16 @@
     var body = { ok: true, result: true };
     if (method === 'getMe') body.result = { username: 'tvs_horana_cmms_bot' };
     if (method === 'getUpdates') {
-      body.result = payload.offset ? [] : FAKE.tgUpdates.slice();
       if (payload.offset) FAKE.tgUpdates = FAKE.tgUpdates.filter(function (u) { return u.update_id >= payload.offset; });
+      body.result = FAKE.tgUpdates.slice();
     }
+    if (method === 'getFile') body.result = { file_path: 'photos/x.jpg', file_size: 2000 };
+    if (url.indexOf('generativelanguage') >= 0) {
+      FAKE.geminiCalls.push(payload);
+      var g = FAKE.gemini ? FAKE.gemini(payload) : { candidates: [{ content: { role: 'model', parts: [{ text: 'OK' }] } }] };
+      return { getContentText: function () { return JSON.stringify(g); }, getResponseCode: function () { return g.__code || 200; } };
+    }
+    if (url.indexOf('/file/bot') >= 0) return { getBlob: function () { return new Blob([255, 216, 255, 224], 'image/jpeg', 'x.jpg'); } };
     return { getContentText: function () { return JSON.stringify(body); }, getResponseCode: function () { return 200; } };
   } };
   var folders = {};
@@ -229,7 +238,7 @@
     getProjectTriggers: function () { return FAKE.triggers.slice(); },
     deleteTrigger: function (t) { FAKE.triggers = FAKE.triggers.filter(function (x) { return x !== t; }); },
     newTrigger: function (fn) {
-      var b = { timeBased: function () { return b; }, everyHours: function () { return b; }, everyDays: function () { return b; },
+      var b = { timeBased: function () { return b; }, everyHours: function () { return b; }, everyMinutes: function () { return b; }, everyDays: function () { return b; },
         atHour: function () { return b; }, nearMinute: function () { return b; }, inTimezone: function () { return b; },
         create: function () { var t = { getHandlerFunction: function () { return fn; } }; FAKE.triggers.push(t); return t; } };
       return b;

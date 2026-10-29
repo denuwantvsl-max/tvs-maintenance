@@ -2,11 +2,13 @@
  * TVS Horana CMMS – API
  * Google Apps Script web app (standalone project) that stores its data in the Google Sheet "TVS Horana CMMS DB".
  * Phase 1: asset register, public QR asset pages, work orders, Telegram + email alerts.
+ * Phase 2: preventive maintenance, digital checklists. Phase 2b: bills / costs, Telegram chat assistant (Gemini).
  *
  * Secrets live ONLY in Script Properties (Project Settings > Script Properties):
  *   TELEGRAM_BOT_TOKEN  – from @BotFather (set by Denuwan)
  *   TOKEN_SECRET        – created automatically by setup()
  *   PHOTO_FOLDER_ID     – created automatically by setup()
+ *   GEMINI_API_KEY      – free key from aistudio.google.com (set by Denuwan); without it the bot only knows /jobs and /pm
  * Staff PINs: type a PIN into the Users tab "NewPIN" column; it is hashed and cleared on first use.
  */
 
@@ -33,6 +35,9 @@ var TABLES = {
     'LastDone', 'LastMeter', 'AssignedTo', 'DoneBy', 'Active', 'Notes', 'Created', 'Updated'],
   PMRecords: ['RecordID', 'TaskID', 'AssetID', 'TemplateID', 'Title', 'DoneAt', 'DoneBy', 'Meter', 'Results', 'OkCount',
     'NotOkCount', 'Remarks', 'Contractor', 'Cost', 'Photo', 'WO_ID'],
+  Expenses: ['ExpenseID', 'BillDate', 'Type', 'Amount', 'Supplier', 'BillNo', 'Description', 'AssetID', 'WO_ID', 'Project',
+    'BillFile', 'EnteredBy', 'Source', 'Created', 'Updated', 'Active'],
+  BotLog: ['Timestamp', 'User', 'Message', 'Reply', 'Actions'],
   Settings: ['Key', 'Value', 'Description'],
   Errors: ['Timestamp', 'Action', 'Message', 'Stack']
 };
@@ -44,7 +49,8 @@ var TEXT_COLUMNS = {
   Users: ['UserID', 'Phone', 'NewPIN', 'PinHash', 'TelegramChatID', 'TelegramLinkCode'],
   ChecklistItems: ['TemplateID', 'ItemNo'],
   PMTasks: ['TaskID', 'AssetID', 'TemplateID', 'AssignedTo'],
-  PMRecords: ['RecordID', 'TaskID', 'AssetID', 'TemplateID', 'WO_ID']
+  PMRecords: ['RecordID', 'TaskID', 'AssetID', 'TemplateID', 'WO_ID'],
+  Expenses: ['ExpenseID', 'BillNo', 'AssetID', 'WO_ID']
 };
 
 var DEFAULT_SETTINGS = [
@@ -60,7 +66,9 @@ var DEFAULT_SETTINGS = [
   ['FAILURE_CAUSES', 'Wear and tear,Lack of lubrication,Electrical fault,Pneumatic leak,Hydraulic fault,Operator error,Damage / accident,Design / installation,Unknown,Not a failure', 'Failure causes (comma separated)'],
   ['NOTIFY_EMAILS', '', 'Extra emails copied on new requests (comma separated, optional)'],
   ['CERT_ALERT_DAYS', '60,30,7,1', 'Telegram alert this many days before an inspection certificate expires'],
-  ['PM_SOON_DAYS', '7', 'PM tasks due within this many days show as "coming up"']
+  ['PM_SOON_DAYS', '7', 'PM tasks due within this many days show as "coming up"'],
+  ['EXPENSE_TYPES', 'Repair,PM / Service,Spare parts,Tool purchase,Contractor,Project,Consumables,Other', 'Bill / cost types (comma separated)'],
+  ['AI_MODEL', 'gemini-2.5-flash', 'Gemini model used by the Telegram assistant (run checkAi to list the ones your key can use)']
 ];
 
 var PRIORITIES = ['Very Urgent', 'Urgent', 'General'];
@@ -120,7 +128,10 @@ var ROUTES = {
   pmSave: apiPmSave_,
   pmRecords: apiPmRecords_,
   pmRecord: apiPmRecord_,
-  templates: apiTemplates_
+  templates: apiTemplates_,
+  expenses: apiExpenses_,
+  expenseSave: apiExpenseSave_,
+  expenseRemove: apiExpenseRemove_
 };
 
 /* =========================================================================
@@ -1034,6 +1045,125 @@ function certAlerts_(assets, s) {
 }
 
 /* =========================================================================
+ * Bills and costs (repairs, PM, tool purchases, projects)
+ * ========================================================================= */
+
+/** Adds or edits one bill. d: {id, billDate 'yyyy-mm-dd', type, amount, supplier, billNo, description, assetId, woId, project}. */
+function saveExpense_(u, d, fileId, source) {
+  var types = list_(settings_().EXPENSE_TYPES);
+  var type = types.filter(function (x) { return x.toLowerCase() === clean_(d.type, 40).toLowerCase(); })[0];
+  if (!type) throw userError_('Please choose the type: ' + types.join(', ') + '.');
+  var amount = num_(d.amount);
+  if (amount === '' || amount <= 0) throw userError_('Please enter the amount.');
+  var billDate = d.billDate ? parseLocal_(String(d.billDate).slice(0, 10)) : startOfDay_();
+  if (!billDate) throw userError_('Bill date looks wrong (use yyyy-mm-dd).');
+  if (billDate.getTime() > Date.now() + 86400000) throw userError_('Bill date is in the future.');
+  var assetId = cleanId_(d.assetId), woId = cleanId_(d.woId);
+  if (assetId && !find_(readTable_('Assets').rows, 'AssetID', assetId)) throw userError_('Machine not found: ' + assetId);
+  if (woId) {
+    var w = find_(readTable_('WorkOrders').rows, 'WO_ID', woId);
+    if (!w) throw userError_('Job not found: ' + woId);
+    if (!assetId && w.AssetID) assetId = String(w.AssetID);
+  }
+  var ch = {
+    BillDate: billDate, Type: type, Amount: Math.round(amount * 100) / 100, Supplier: clean_(d.supplier, 100), BillNo: clean_(d.billNo, 40),
+    Description: clean_(d.description, 500), AssetID: assetId, WO_ID: woId, Project: clean_(d.project, 80), Updated: new Date()
+  };
+  if (fileId) ch.BillFile = fileId;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var t = readTable_('Expenses', true);
+    if (d.id) {
+      var row = find_(t.rows, 'ExpenseID', String(d.id));
+      if (!row || !yes_(row.Active)) throw userError_('Bill not found: ' + d.id);
+      if (!isManager_(u) && String(row.EnteredBy) !== String(u.Name)) throw userError_('Only the admin, supervisor or the person who entered it can edit this bill.');
+      setCells_(t, row, ch);
+      return { id: String(row.ExpenseID), amount: ch.Amount, type: type };
+    }
+    var dup = ch.BillNo && ch.Supplier && t.rows.filter(function (r) {
+      return yes_(r.Active) && String(r.BillNo).toUpperCase() === ch.BillNo.toUpperCase() && String(r.Supplier).toUpperCase() === ch.Supplier.toUpperCase();
+    })[0];
+    if (dup && !d.allowDuplicate) throw userError_('This bill (' + ch.Supplier + ' #' + ch.BillNo + ') is already saved as ' + dup.ExpenseID + '.');
+    var prefix = 'EX-' + Utilities.formatDate(new Date(), TZ, 'yyMM') + '-';
+    var max = 0;
+    t.rows.forEach(function (r) { var id = String(r.ExpenseID || ''); if (id.indexOf(prefix) === 0) max = Math.max(max, Number(id.slice(prefix.length)) || 0); });
+    ch.ExpenseID = prefix + ('00' + (max + 1)).slice(-3);
+    ch.EnteredBy = u.Name; ch.Source = source || 'App'; ch.Created = ch.Updated; ch.Active = 'Yes';
+    appendObj_('Expenses', ch);
+    return { id: ch.ExpenseID, amount: ch.Amount, type: type };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function expenseSummary_(r) {
+  return { id: String(r.ExpenseID), billDate: iso_(r.BillDate), type: r.Type, amount: Number(r.Amount) || 0, supplier: r.Supplier,
+    billNo: r.BillNo, description: r.Description, assetId: r.AssetID, woId: r.WO_ID, project: r.Project, enteredBy: r.EnteredBy,
+    source: r.Source, fileUrl: r.BillFile ? 'https://drive.google.com/file/d/' + r.BillFile + '/view' : '',
+    thumbUrl: r.BillFile ? 'https://drive.google.com/thumbnail?id=' + r.BillFile + '&sz=w300' : '' };
+}
+
+/** Bills between two dates with totals by type / project / machine / supplier. */
+function expenseQuery_(f) {
+  var from = f.from ? parseLocal_(String(f.from).slice(0, 10)) : null;
+  var to = f.to ? parseLocal_(String(f.to).slice(0, 10)) : null;
+  var q = String(f.q || '').toLowerCase().trim();
+  var all = readTable_('Expenses').rows.filter(function (r) { return r.ExpenseID && yes_(r.Active); });
+  var projects = {};
+  all.forEach(function (r) { if (r.Project) projects[String(r.Project).trim()] = 1; });
+  var rows = all.filter(function (r) {
+    var d = dateNum_(r.BillDate);
+    if (from && d < from.getTime()) return false;
+    if (to && d >= to.getTime() + 86400000) return false;
+    if (f.type && String(r.Type).toLowerCase() !== String(f.type).toLowerCase()) return false;
+    if (f.project && String(r.Project).toLowerCase().indexOf(String(f.project).toLowerCase()) < 0) return false;
+    if (f.assetId && String(r.AssetID).toUpperCase() !== cleanId_(f.assetId)) return false;
+    if (q && [r.ExpenseID, r.Supplier, r.BillNo, r.Description, r.AssetID, r.WO_ID, r.Project, r.Type].join(' ').toLowerCase().indexOf(q) < 0) return false;
+    return true;
+  }).sort(function (a, b) { return dateNum_(b.BillDate) - dateNum_(a.BillDate); });
+  var sum = function (key) {
+    var m = {};
+    rows.forEach(function (r) { var k = String(r[key] || '').trim() || '(none)'; m[k] = (m[k] || 0) + (Number(r.Amount) || 0); });
+    return Object.keys(m).map(function (k) { return { name: k, amount: Math.round(m[k] * 100) / 100 }; }).sort(function (a, b) { return b.amount - a.amount; });
+  };
+  return {
+    rows: rows, total: Math.round(rows.reduce(function (a, r) { return a + (Number(r.Amount) || 0); }, 0) * 100) / 100,
+    byType: sum('Type'), byProject: sum('Project'), byAsset: sum('AssetID'), bySupplier: sum('Supplier'),
+    projects: Object.keys(projects).sort()
+  };
+}
+
+function apiExpenses_(p) {
+  auth_(p);
+  var r = expenseQuery_({ from: p.from, to: p.to, type: p.type, project: p.project, assetId: p.assetId, q: p.q });
+  return { bills: r.rows.slice(0, 300).map(expenseSummary_), count: r.rows.length, total: r.total, byType: r.byType,
+    byProject: r.byProject, byAsset: r.byAsset.slice(0, 15), bySupplier: r.bySupplier.slice(0, 15), projects: r.projects,
+    types: list_(settings_().EXPENSE_TYPES) };
+}
+
+function apiExpenseSave_(p) {
+  var u = auth_(p, TEAM_ROLES);
+  var fid = p.photo ? savePhoto_(p.photo, 'BILL_' + Utilities.formatDate(new Date(), TZ, 'yyyyMMdd_HHmmss')) : '';
+  return saveExpense_(u, p.bill || {}, fid, 'App');
+}
+
+function apiExpenseRemove_(p) {
+  var u = auth_(p, MANAGER_ROLES);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var t = readTable_('Expenses', true);
+    var row = find_(t.rows, 'ExpenseID', String(p.id || ''));
+    if (!row) throw userError_('Bill not found.');
+    setCells_(t, row, { Active: 'No', Updated: new Date(), Description: clean_(row.Description + ' [removed by ' + u.Name + ']', 600) });
+    return { id: String(row.ExpenseID) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* =========================================================================
  * Dashboard
  * ========================================================================= */
 
@@ -1089,6 +1219,7 @@ function apiDashboard_(p) {
   k.pmToday = pmTasks.filter(function (x) { return x.state === 'today'; }).length;
   k.pmDoneMonth = readTable_('PMRecords').rows.filter(function (r) { return dateNum_(r.DoneAt) >= monthStart.getTime(); }).length;
   k.pmCompliance = (k.pmDoneMonth + k.pmOverdue) ? Math.round(k.pmDoneMonth / (k.pmDoneMonth + k.pmOverdue) * 100) : null;
+  k.billsMonth = expenseQuery_({ from: Utilities.formatDate(monthStart, TZ, 'yyyy-MM-dd') }).total;
   return {
     kpi: k,
     pmDue: pmTasks.filter(function (x) { return x.state === 'overdue' || x.state === 'today'; })
@@ -1164,22 +1295,481 @@ function apiTelegramLinkCheck_(p) {
   var row = find_(t.rows, 'UserID', String(u.UserID));
   if (!row.TelegramLinkCode && row.TelegramChatID) return { linked: true };
   if (!row.TelegramLinkCode) throw userError_('Press "Connect Telegram" first.');
-  var upd = tgCall_('getUpdates', { timeout: 0, allowed_updates: ['message'] });
-  if (!upd || !upd.ok) throw userError_('Could not read messages from Telegram. Try again.');
-  var lastId = 0;
-  (upd.result || []).forEach(function (x) {
-    lastId = Math.max(lastId, x.update_id);
-    var m = x.message;
-    var mt = m && m.text && /^(?:\/start\s+)?(\d{6})$/.exec(m.text.trim());
-    if (!mt || !m.chat) return;
-    // link whoever is waiting with this code (two people may link at the same time)
-    var who = find_(t.rows, 'TelegramLinkCode', mt[1]);
-    if (!who) return;
-    setCells_(t, who, { TelegramChatID: String(m.chat.id), TelegramLinkCode: '' });
-    tgSend_(m.chat.id, '✅ Hello ' + esc_(who.Name) + '! You will now receive TVS Horana maintenance alerts here.');
-  });
-  if (lastId) tgCall_('getUpdates', { offset: lastId + 1, timeout: 0 }); // mark messages as read
+  var lock = LockService.getUserLock();
+  if (!lock.tryLock(25000)) throw userError_('Telegram is busy. Try again in a minute.');
+  try { pollTelegram_(); } finally { lock.releaseLock(); }
+  row = find_(readTable_('Users', true).rows, 'UserID', String(u.UserID));
   return { linked: !!row.TelegramChatID && !row.TelegramLinkCode };
+}
+
+/* =========================================================================
+ * Telegram chat assistant: the team talks to the bot (jobs, PM, machines, bills).
+ * Messages are collected every minute by the telegramPoll trigger (Apps Script web apps answer Telegram
+ * webhooks with a redirect, so polling is the reliable way). Gemini understands the message and calls the
+ * tools below; every tool runs with the sender's own permissions (same checks as the app).
+ * ========================================================================= */
+
+/** Trigger: every minute. */
+function telegramPoll() {
+  TABLE_CACHE_ = {};
+  if (!tgToken_()) return;
+  var lock = LockService.getUserLock();
+  if (!lock.tryLock(1000)) return; // the previous run is still answering
+  try { pollTelegram_(); } finally { lock.releaseLock(); }
+}
+
+function pollTelegram_() {
+  var props = PropertiesService.getScriptProperties();
+  var offset = Number(props.getProperty('TG_OFFSET') || 0);
+  var payload = { timeout: 0, allowed_updates: ['message'] };
+  if (offset) payload.offset = offset;
+  var upd = tgCall_('getUpdates', payload);
+  if (!upd || !upd.ok) return 0;
+  var n = 0;
+  (upd.result || []).forEach(function (x) {
+    props.setProperty('TG_OFFSET', String(x.update_id + 1)); // never answer the same message twice
+    try { handleTgMessage_(x.message); n++; } catch (err) { logError_('bot', err); }
+  });
+  return n;
+}
+
+function handleTgMessage_(m) {
+  if (!m || !m.chat || (m.chat.type && m.chat.type !== 'private')) return;
+  var chatId = String(m.chat.id);
+  var text = clean_(m.text || m.caption || '', 3000);
+  var mt = /^(?:\/start\s+)?(\d{6})$/.exec(text);
+  if (mt) {
+    var lt = readTable_('Users', true);
+    var who = find_(lt.rows, 'TelegramLinkCode', mt[1]);
+    if (who) {
+      setCells_(lt, who, { TelegramChatID: chatId, TelegramLinkCode: '' });
+      tgSend_(chatId, '✅ Hello ' + esc_(who.Name) + '! You will now receive TVS Horana maintenance alerts here.\n\n' + esc_(botHelp_()));
+      return;
+    }
+  }
+  var u = find_(readTable_('Users').rows, 'TelegramChatID', chatId);
+  if (!u || !isActive_(u)) {
+    tgText_(chatId, 'This chat is not connected to the TVS Horana CMMS. Open the app → Me → Connect Telegram, then send the 6-digit code here.');
+    return;
+  }
+  if (TEAM_ROLES.indexOf(String(u.Role || '').toLowerCase()) < 0) { tgText_(chatId, 'Only the maintenance team can use this assistant.'); return; }
+  if (/^\/(start|help)\b/i.test(text)) { tgText_(chatId, botHelp_()); return; }
+  if (/^\/reset\b/i.test(text)) { botMemory_(chatId, null, true); tgText_(chatId, 'OK, I forgot our conversation. Start again.'); return; }
+
+  var file = null;
+  try { file = tgFile_(m, u); } catch (err) { logError_('bot.file', err); tgText_(chatId, 'Could not read the attachment: ' + err.message); return; }
+  if (!text && !file) { tgText_(chatId, 'Please send text, a photo or a PDF bill.'); return; }
+
+  var reply, actions = [];
+  var key = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!key) {
+    reply = botBasic_(u, text, file);
+  } else {
+    tgCall_('sendChatAction', { chat_id: chatId, action: 'typing' });
+    try {
+      var r = botAi_(u, chatId, text, file, key);
+      reply = r.reply; actions = r.actions;
+    } catch (err) {
+      logError_('bot.ai', err);
+      reply = (err && err.userError ? err.message : 'Sorry, the assistant had a problem: ' + short_((err && err.message) || err, 200)) +
+        '\nYou can still use the app: ' + settings_().APP_URL + 'app.html';
+    }
+  }
+  tgText_(chatId, reply);
+  try {
+    appendObj_('BotLog', { Timestamp: new Date(), User: u.Name, Message: short_((file ? '[' + file.kind + '] ' : '') + text, 1000),
+      Reply: short_(reply, 1500), Actions: actions.join(', ') });
+  } catch (err) { logError_('bot.log', err); }
+}
+
+/** Plain-text message (AI answers may contain < or >), split into Telegram-sized parts. */
+function tgText_(chatId, text) {
+  var s = String(text || '').trim() || '…';
+  for (var i = 0; i < s.length && i < 12000; i += 3900) {
+    try { tgCall_('sendMessage', { chat_id: String(chatId), text: s.slice(i, i + 3900), disable_web_page_preview: true }); } catch (err) { logError_('telegram.text', err); }
+  }
+}
+
+function botHelp_() {
+  return 'I am the TVS Horana maintenance assistant. Just write to me in English or Sinhala, for example:\n' +
+    '• What jobs are overdue?\n• WO-2026-0012 done, replaced the motor bearing, cost 4500\n• Assign MWRF123 to Gayan\n' +
+    '• Set next due of the compressor PM to 5 Nov\n• Forklift hour meter 1250\n• Generator monthly check done, all OK\n' +
+    '• Send a photo of a bill → I read it and record the cost (repair, tools, spare parts, project …)\n' +
+    '• Send a machine photo with "EN-CA-01 photo" → set as the machine photo\n• How much did we spend this month on tools?\n\n' +
+    '/reset – forget the conversation · /help – this message';
+}
+
+/** Downloads a photo / image / PDF from Telegram, saves it to Drive and remembers it for the next messages. */
+function tgFile_(m, u) {
+  var fileId = '', mime = '', kind = '';
+  if (m.photo && m.photo.length) { fileId = m.photo[m.photo.length - 1].file_id; mime = 'image/jpeg'; kind = 'photo'; }
+  else if (m.document && /^(image\/(jpeg|png|webp)|application\/pdf)$/.test(String(m.document.mime_type))) {
+    fileId = m.document.file_id; mime = m.document.mime_type; kind = mime === 'application/pdf' ? 'pdf' : 'photo';
+  } else if (m.document) { throw userError_('only photos, images and PDF files are supported'); }
+  if (!fileId) return null;
+  var info = tgCall_('getFile', { file_id: fileId });
+  if (!info || !info.ok) throw userError_('Telegram did not give the file');
+  if (info.result.file_size && info.result.file_size > 15 * 1024 * 1024) throw userError_('file is larger than 15 MB');
+  var blob = UrlFetchApp.fetch('https://api.telegram.org/file/bot' + tgToken_() + '/' + info.result.file_path).getBlob();
+  var bytes = blob.getBytes();
+  var name = 'TG_' + Utilities.formatDate(new Date(), TZ, 'yyyyMMdd_HHmmss') + '_' + String(u.UserID) + (kind === 'pdf' ? '.pdf' : '.jpg');
+  var f = photoFolder_().createFile(Utilities.newBlob(bytes, mime, name));
+  f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  var out = { id: f.getId(), mime: mime, kind: kind };
+  CacheService.getScriptCache().put('tgf_' + m.chat.id, JSON.stringify(out), 3600);
+  out.b64 = bytes.length <= 7 * 1024 * 1024 ? Utilities.base64Encode(bytes) : '';
+  return out;
+}
+
+/** Without an AI key: a few fixed commands. */
+function botBasic_(u, text, file) {
+  var s = settings_(), token = makeToken_(String(u.UserID));
+  if (/^\/?jobs?\b/i.test(text)) {
+    var j = apiJobs_({ token: token, view: 'mine' });
+    return 'Your open jobs (' + j.total + '):\n' + (j.jobs.slice(0, 15).map(function (x) { return '• ' + x.id + ' ' + short_(x.assetName || x.location, 40) + (x.overdue ? ' – OVERDUE' : ''); }).join('\n') || '—');
+  }
+  if (/^\/?pm\b/i.test(text)) {
+    var p = apiPmList_({ token: token, view: 'due' });
+    return 'PM due now (' + p.total + '):\n' + (p.tasks.slice(0, 20).map(function (x) { return '• ' + x.assetId + ' ' + short_(x.title, 40) + (x.state === 'overdue' ? ' – ' + x.daysLate + ' d late' : ''); }).join('\n') || '—');
+  }
+  return (file ? 'File saved. ' : '') + 'The AI assistant is not switched on yet (GEMINI_API_KEY missing in Script Properties). ' +
+    'For now I understand /jobs and /pm. App: ' + s.APP_URL + 'app.html';
+}
+
+/** Short memory per chat (last 10 messages, 2 hours). clear=true forgets it. */
+function botMemory_(chatId, turns, clear) {
+  var c = CacheService.getScriptCache(), k = 'tgh_' + chatId;
+  if (clear) { c.remove(k); c.remove('tgf_' + chatId); return []; }
+  if (turns) {
+    var keep = turns.slice(-10), js = JSON.stringify(keep);
+    while (js.length > 90000 && keep.length > 2) { keep = keep.slice(2); js = JSON.stringify(keep); }
+    c.put(k, js, 7200);
+    return keep;
+  }
+  try { return JSON.parse(c.get(k) || '[]'); } catch (e) { return []; }
+}
+
+function botSystem_(u, s) {
+  var users = readTable_('Users').rows.filter(function (x) { return x.UserID && isActive_(x); })
+    .map(function (x) { return x.UserID + ' ' + x.Name + ' (' + String(x.Role || '').toLowerCase() + ')'; }).join('; ');
+  var projects = expenseQuery_({}).projects.slice(0, 40).join('; ');
+  return [
+    'You are the maintenance assistant of TVS Lanka (Pvt) Ltd, Vehicle Assembly Complex, Horana (Sri Lanka), working inside the plant\'s CMMS.',
+    'You chat on Telegram with ' + u.Name + ' (role: ' + String(u.Role || '').toLowerCase() + ', user ID ' + u.UserID + ').',
+    'Now: ' + Utilities.formatDate(new Date(), TZ, "EEEE yyyy-MM-dd HH:mm") + ' Sri Lanka time.',
+    'Rules:',
+    '- Answer in the language the user writes (English, Sinhala or Singlish). Keep answers short, plain text (no markdown, no tables), bullets with "•".',
+    '- Use the tools to read and change data. Never invent IDs, numbers, dates or results. If a tool returns an error, explain it simply.',
+    '- Changes (job actions, new jobs, machine edits, PM updates, PM done, meter readings, bills): if the request is clear, do it and then say exactly what was saved, with the ID. If the machine, job, amount or anything important is unclear, ask one short question first. Search before guessing an ID.',
+    '- Bills / receipts / invoices (photo or PDF): read supplier, bill date, bill number, total amount in LKR and the main items. Show them, propose the type and the machine, job or project, and ask "Save?". Save with add_bill (attach_last_file=true) only after the user agrees. Never save the same bill twice.',
+    '- A machine photo sent with a machine ID: use save_machine with use_last_photo=true.',
+    '- PM checklists: mark done only when the user clearly says the check was done (all OK, or which items were Not OK). Never assume.',
+    '- You cannot change the website design or program code. For that, tell the user to ask Denuwan to have it changed by the developer.',
+    '- Use yyyy-mm-dd dates in tool calls. Money is LKR. Job IDs look like WO-2026-0001 or MWRF123; machine IDs like EN-CA-01, PD-AL-02, QIP08-001.',
+    '- Links: app ' + s.APP_URL + 'app.html, a job: ' + s.APP_URL + 'app.html#wo=<ID>, a machine: ' + s.APP_URL + 'asset.html?id=<ID>.',
+    'Staff: ' + users,
+    'Bill types: ' + list_(s.EXPENSE_TYPES).join(', '),
+    'Priorities: Very Urgent (' + targetHours_('Very Urgent', s) + ' h), Urgent (' + targetHours_('Urgent', s) + ' h), General (' + targetHours_('General', s) + ' h).',
+    'Job categories: ' + list_(s.CATEGORIES).join(', ') + '. Failure causes: ' + list_(s.FAILURE_CAUSES).join(', ') + '.',
+    'Known projects: ' + (projects || '(none yet)')
+  ].join('\n');
+}
+
+var BOT_TOOLS = [
+  { name: 'find_jobs', description: 'List work orders (jobs).', parameters: { type: 'OBJECT', properties: {
+    view: { type: 'STRING', enum: ['open', 'new', 'mine', 'overdue', 'done', 'closed', 'all'], description: 'open = not finished; done = waiting for requester confirmation' },
+    query: { type: 'STRING', description: 'search words: job ID, machine, location, text' } } } },
+  { name: 'get_job', description: 'Full details and history of one job.', parameters: { type: 'OBJECT', properties: { id: { type: 'STRING' } }, required: ['id'] } },
+  { name: 'job_action', description: 'Change a job: assign (approve + give to a person), start, hold (needs note), complete (needs action_taken), close (managers, after complete), reopen (needs note), reject (needs note), note (add a comment), edit (priority / category / machine).',
+    parameters: { type: 'OBJECT', properties: {
+      id: { type: 'STRING' }, op: { type: 'STRING', enum: ['assign', 'start', 'hold', 'complete', 'close', 'reopen', 'reject', 'note', 'edit'] },
+      note: { type: 'STRING' }, assignee: { type: 'STRING', description: 'user ID or name' }, priority: { type: 'STRING', enum: PRIORITIES },
+      action_taken: { type: 'STRING' }, failure_cause: { type: 'STRING' }, root_cause: { type: 'STRING' }, parts_used: { type: 'STRING' },
+      cost: { type: 'NUMBER' }, labour_hours: { type: 'NUMBER' }, contractor: { type: 'STRING', description: 'contractor name if a contractor did the work' },
+      category: { type: 'STRING' }, asset_id: { type: 'STRING' } }, required: ['id', 'op'] } },
+  { name: 'create_job', description: 'Raise a new maintenance job (work order).', parameters: { type: 'OBJECT', properties: {
+    description: { type: 'STRING' }, location: { type: 'STRING' }, asset_id: { type: 'STRING' }, priority: { type: 'STRING', enum: PRIORITIES },
+    category: { type: 'STRING' }, production_stopped: { type: 'BOOLEAN' } }, required: ['description', 'priority'] } },
+  { name: 'find_machines', description: 'Search machines / assets / tools by ID, name, area or location.', parameters: { type: 'OBJECT', properties: { query: { type: 'STRING' } }, required: ['query'] } },
+  { name: 'get_machine', description: 'Details of one machine: specs, certificate, meter, PM tasks, recent jobs.', parameters: { type: 'OBJECT', properties: { id: { type: 'STRING' } }, required: ['id'] } },
+  { name: 'save_machine', description: 'Add a new machine (is_new=true) or change fields of an existing one. Only given fields change. Admin / supervisor only.',
+    parameters: { type: 'OBJECT', properties: {
+      id: { type: 'STRING' }, is_new: { type: 'BOOLEAN' }, name: { type: 'STRING' }, area: { type: 'STRING' }, location: { type: 'STRING' },
+      category: { type: 'STRING' }, parent_id: { type: 'STRING' }, make: { type: 'STRING' }, model: { type: 'STRING' }, serial_no: { type: 'STRING' },
+      year: { type: 'STRING' }, specs: { type: 'STRING' }, criticality: { type: 'STRING', enum: ['A', 'B', 'C'] }, status: { type: 'STRING', enum: ['Active', 'Standby', 'Under repair', 'Disposed'] },
+      maintained_by: { type: 'STRING' }, notes: { type: 'STRING' }, meter_unit: { type: 'STRING' }, cert_expiry: { type: 'STRING', description: 'yyyy-mm-dd' },
+      use_last_photo: { type: 'BOOLEAN', description: 'set the photo the user just sent as the machine photo' } }, required: ['id'] } },
+  { name: 'remove_machine', description: 'Remove a machine (kept as Disposed if it has history). Admin / supervisor only.', parameters: { type: 'OBJECT', properties: { id: { type: 'STRING' }, reason: { type: 'STRING' } }, required: ['id'] } },
+  { name: 'set_meter', description: 'Record the hour meter reading of a machine (forklift, generator, compressor).', parameters: { type: 'OBJECT', properties: { asset_id: { type: 'STRING' }, value: { type: 'NUMBER' } }, required: ['asset_id', 'value'] } },
+  { name: 'find_pm', description: 'List preventive maintenance (PM) tasks.', parameters: { type: 'OBJECT', properties: {
+    view: { type: 'STRING', enum: ['due', 'week', 'mine', 'unscheduled', 'all'], description: 'due = overdue or today; week = due within the next days; unscheduled = no date yet' },
+    query: { type: 'STRING' } } } },
+  { name: 'update_pm_task', description: 'Change a PM task: next due date, frequency, hour interval, assigned person, notes, active. Admin / supervisor only.',
+    parameters: { type: 'OBJECT', properties: {
+      task_id: { type: 'STRING' }, next_due: { type: 'STRING', description: 'yyyy-mm-dd' }, freq_unit: { type: 'STRING', enum: ['Day', 'Week', 'Month', 'None'] },
+      freq_value: { type: 'NUMBER' }, meter_interval: { type: 'NUMBER' }, assigned_to: { type: 'STRING', description: 'user ID or name; "none" to clear' },
+      done_by: { type: 'STRING', description: 'Internal or contractor name' }, notes: { type: 'STRING' }, active: { type: 'BOOLEAN' }, title: { type: 'STRING' } }, required: ['task_id'] } },
+  { name: 'pm_done', description: 'Record a PM check / service as done. For checklists the user must say all items were OK or name the Not OK items.',
+    parameters: { type: 'OBJECT', properties: {
+      task_id: { type: 'STRING' }, all_ok: { type: 'BOOLEAN' }, not_ok_items: { type: 'ARRAY', items: { type: 'STRING' }, description: 'words from the checklist items that were Not OK' },
+      meter: { type: 'NUMBER' }, remarks: { type: 'STRING' }, contractor: { type: 'STRING' }, cost: { type: 'NUMBER' },
+      use_last_photo: { type: 'BOOLEAN' } }, required: ['task_id'] } },
+  { name: 'add_bill', description: 'Save a bill / cost. Link it to a machine, a job or a project when known.', parameters: { type: 'OBJECT', properties: {
+    bill_date: { type: 'STRING', description: 'yyyy-mm-dd' }, type: { type: 'STRING' }, amount: { type: 'NUMBER', description: 'total in LKR' },
+    supplier: { type: 'STRING' }, bill_no: { type: 'STRING' }, description: { type: 'STRING' }, asset_id: { type: 'STRING' }, job_id: { type: 'STRING' },
+    project: { type: 'STRING' }, attach_last_file: { type: 'BOOLEAN', description: 'attach the bill photo / PDF the user sent' } }, required: ['type', 'amount'] } },
+  { name: 'cost_report', description: 'Bills and costs between dates, with totals by type, project, machine and supplier.', parameters: { type: 'OBJECT', properties: {
+    from: { type: 'STRING', description: 'yyyy-mm-dd' }, to: { type: 'STRING', description: 'yyyy-mm-dd' }, type: { type: 'STRING' }, project: { type: 'STRING' },
+    asset_id: { type: 'STRING' }, query: { type: 'STRING' } } } },
+  { name: 'summary', description: 'Plant maintenance summary: open / overdue jobs, PM due, compliance, certificates, costs this month.' }
+];
+
+function gemini_(key, model, body) {
+  var res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
+    method: 'post', contentType: 'application/json', headers: { 'x-goog-api-key': key }, payload: JSON.stringify(body), muteHttpExceptions: true
+  });
+  var code = res.getResponseCode();
+  var out = {};
+  try { out = JSON.parse(res.getContentText()); } catch (e) { out = {}; }
+  if (code === 429) throw userError_('The free AI limit is used up for now. Try again later, or use the app.');
+  if (code !== 200) throw new Error('Gemini ' + code + ': ' + short_((out.error && out.error.message) || res.getContentText(), 300));
+  return out;
+}
+
+function botAi_(u, chatId, text, file, key) {
+  var s = settings_();
+  var model = s.AI_MODEL || 'gemini-2.5-flash';
+  var hist = botMemory_(chatId);
+  var lastFile = null;
+  try { lastFile = JSON.parse(CacheService.getScriptCache().get('tgf_' + chatId) || 'null'); } catch (e) { lastFile = null; }
+  var parts = [];
+  if (file && file.b64) parts.push({ inlineData: { mimeType: file.mime, data: file.b64 } });
+  var note = file ? '[The user sent a ' + file.kind + (file.b64 ? '' : ' (too large to read)') + '; it is saved and can be attached.]\n' : '';
+  parts.push({ text: note + (text || (file ? 'Here is a ' + file.kind + '.' : '')) });
+  var contents = hist.concat([{ role: 'user', parts: parts }]);
+  var ctx = { user: u, token: makeToken_(String(u.UserID)), file: file || lastFile, actions: [] };
+  var reply = '', sys = botSystem_(u, s);
+  for (var round = 0; round < 6; round++) {
+    var res = gemini_(key, model, { systemInstruction: { parts: [{ text: sys }] }, contents: contents,
+      tools: [{ functionDeclarations: BOT_TOOLS }], generationConfig: { temperature: 0.2 } });
+    var content = res.candidates && res.candidates[0] && res.candidates[0].content;
+    if (!content || !content.parts) { reply = 'Sorry, I could not answer that. Please say it in other words.'; break; }
+    contents.push(content);
+    var calls = content.parts.filter(function (p) { return p.functionCall; });
+    if (!calls.length) {
+      reply = content.parts.filter(function (p) { return p.text && !p.thought; }).map(function (p) { return p.text; }).join('').trim();
+      break;
+    }
+    contents.push({ role: 'user', parts: calls.map(function (c) {
+      var name = c.functionCall.name, out;
+      TABLE_CACHE_ = {};
+      try { out = runBotTool_(name, c.functionCall.args || {}, ctx); ctx.actions.push(name); }
+      catch (err) { out = { error: (err && err.message) || String(err) }; ctx.actions.push(name + '(error)'); }
+      return { functionResponse: { name: name, response: { result: out } } };
+    }) });
+  }
+  if (!reply) reply = 'Done.';
+  botMemory_(chatId, hist.concat([{ role: 'user', parts: [{ text: note + (text || '') }] }, { role: 'model', parts: [{ text: reply }] }]));
+  return { reply: reply, actions: ctx.actions };
+}
+
+/** Finds a user by ID or (part of the) name. */
+function botUser_(v) {
+  var x = String(v || '').trim().toLowerCase();
+  if (!x) return null;
+  var rows = readTable_('Users').rows.filter(function (u) { return u.UserID && isActive_(u); });
+  return find_(rows, 'UserID', x) || rows.filter(function (u) { return String(u.Name).toLowerCase() === x; })[0] ||
+    rows.filter(function (u) { return String(u.Name).toLowerCase().indexOf(x) >= 0; })[0] || null;
+}
+
+function ymd_(v) { return v ? Utilities.formatDate(new Date(dateNum_(v)), TZ, 'yyyy-MM-dd') : ''; }
+
+function runBotTool_(name, a, ctx) {
+  var tok = ctx.token, u = ctx.user;
+  var job = function (j) {
+    return { id: j.id, status: j.status, priority: j.priority, machine: j.assetId ? j.assetId + ' ' + j.assetName : '', location: j.location,
+      description: short_(j.description, 120), assigned: j.assignedName, overdue: j.overdue, created: ymd_(j.created) };
+  };
+  switch (name) {
+    case 'find_jobs': {
+      var r = apiJobs_({ token: tok, view: a.view || 'open', q: a.query || '' });
+      return { total: r.total, jobs: r.jobs.slice(0, 15).map(job) };
+    }
+    case 'get_job': {
+      var j = apiJob_({ token: tok, id: a.id });
+      var o = {};
+      ['WO_ID', 'Status', 'Priority', 'Created', 'RequesterName', 'Department', 'Location', 'AssetID', 'AssetName', 'Category', 'Description',
+        'ProductionStopped', 'DueAt', 'AssignedTo', 'WorkType', 'FailureCause', 'RootCause', 'ActionTaken', 'PartsUsed', 'Cost', 'Contractor',
+        'DowntimeMin', 'CompletedAt', 'ClosedAt'].forEach(function (k) { if (j[k] !== '' && j[k] !== undefined) o[k] = k === 'Description' || k === 'ActionTaken' ? short_(j[k], 600) : j[k]; });
+      o.assignedName = j.assignedName; o.overdue = j.overdue;
+      o.history = j.log.slice(-6).map(function (l) { return ymd_(l.time) + ' ' + l.user + ': ' + l.action + (l.note ? ' – ' + short_(l.note, 120) : ''); });
+      return o;
+    }
+    case 'job_action': {
+      var d = { note: a.note || '', priority: a.priority, actionTaken: a.action_taken, failureCause: a.failure_cause, rootCause: a.root_cause,
+        partsUsed: a.parts_used, cost: a.cost, labourHours: a.labour_hours, category: a.category, assetId: a.asset_id };
+      if (a.op === 'assign') {
+        var who = botUser_(a.assignee);
+        if (!who) throw userError_('Who should do the job? Staff: ' + readTable_('Users').rows.map(function (x) { return x.Name; }).join(', '));
+        d.assignee = String(who.UserID);
+      }
+      if (a.op === 'complete') { d.doneBy = a.contractor ? 'Contractor' : 'Internal'; d.contractor = a.contractor || ''; }
+      if (a.op === 'edit' && a.asset_id === undefined) delete d.assetId;
+      var res = apiJobAction_({ token: tok, id: a.id, op: a.op, data: d });
+      return { id: res.WO_ID, status: res.Status, assigned: res.assignedName, priority: res.Priority };
+    }
+    case 'create_job': {
+      var c = apiCreateRequest_({ request: { name: u.Name, email: String(u.Email || ''), department: 'Maintenance', location: a.location || '',
+        category: a.category || 'General Maintenance', priority: a.priority || 'General', description: a.description, assetId: a.asset_id || '',
+        productionStopped: !!a.production_stopped } });
+      return { id: c.id, link: settings_().APP_URL + 'app.html#wo=' + c.id };
+    }
+    case 'find_machines': {
+      var q = String(a.query || '').toLowerCase();
+      var words = q.split(/\s+/).filter(String);
+      var list = readTable_('Assets').rows.filter(function (x) {
+        if (!x.AssetID) return false;
+        var hay = [x.AssetID, x.Name, x.Area, x.Location, x.Category, x.Make, x.Model, x.SerialNo].join(' ').toLowerCase();
+        return words.every(function (w) { return hay.indexOf(w) >= 0; });
+      });
+      return { total: list.length, machines: list.slice(0, 20).map(function (x) {
+        return { id: x.AssetID, name: x.Name, area: x.Area, location: x.Location, status: x.Status || 'Active', parent: x.ParentID,
+          certExpiry: ymd_(x.CertExpiry), meter: x.MeterUnit ? x.CurrentMeter + ' ' + x.MeterUnit : '' };
+      }) };
+    }
+    case 'get_machine': {
+      var m = apiAssetPublic_({ token: tok, id: a.id });
+      var kids = m.children || [];
+      m.children = kids.length + ' parts/tools' + (kids.length ? ': ' + kids.slice(0, 10).map(function (k) { return k.id; }).join(', ') + (kids.length > 10 ? ' …' : '') : '');
+      if (m.staff) {
+        m.staff.jobs = (m.staff.jobs || []).slice(0, 5).map(job);
+        m.staff.pm = (m.staff.pm || []).map(function (t) { return { id: t.id, title: t.title, freq: t.freq, nextDue: ymd_(t.nextDue), state: t.state, lastDone: ymd_(t.lastDone) }; });
+      }
+      delete m.photoUrl;
+      return m;
+    }
+    case 'save_machine': {
+      var id = cleanId_(a.id);
+      var row = find_(readTable_('Assets').rows, 'AssetID', id);
+      if (!row && !a.is_new) throw userError_('Machine not found: ' + id + '. To add it as a new machine, say so.');
+      var asset = { AssetID: id };
+      if (row) {
+        ['Name', 'Area', 'Location', 'Category', 'ParentID', 'Make', 'Model', 'SerialNo', 'Year', 'Specs', 'Criticality', 'Status', 'MaintainedBy',
+          'PMFrequency', 'ChecklistRef', 'CertRequired', 'CertFileId', 'Notes', 'MeterUnit'].forEach(function (k) { asset[k] = String(row[k] === undefined ? '' : row[k]); });
+        asset.CertExpiry = ymd_(row.CertExpiry);
+      }
+      var map = { name: 'Name', area: 'Area', location: 'Location', category: 'Category', parent_id: 'ParentID', make: 'Make', model: 'Model',
+        serial_no: 'SerialNo', year: 'Year', specs: 'Specs', criticality: 'Criticality', status: 'Status', maintained_by: 'MaintainedBy',
+        notes: 'Notes', meter_unit: 'MeterUnit', cert_expiry: 'CertExpiry' };
+      var changed = [];
+      Object.keys(map).forEach(function (k) { if (a[k] !== undefined && a[k] !== null) { asset[map[k]] = String(a[k]); changed.push(map[k]); } });
+      if (a.use_last_photo && !(ctx.file && ctx.file.kind === 'photo')) throw userError_('Please send the machine photo first.');
+      var sv = apiAssetSave_({ token: tok, asset: asset, isNew: !row });
+      if (a.use_last_photo) {
+        var at = readTable_('Assets', true);
+        setCells_(at, find_(at.rows, 'AssetID', id), { Photo: ctx.file.id, Updated: new Date() });
+        changed.push('Photo');
+      }
+      return { id: sv.id, added: !row, changed: changed };
+    }
+    case 'remove_machine':
+      return apiAssetRemove_({ token: tok, id: a.id, reason: a.reason || '' });
+    case 'set_meter': {
+      var mt = readTable_('Assets', true);
+      var ma = find_(mt.rows, 'AssetID', cleanId_(a.asset_id));
+      if (!ma) throw userError_('Machine not found: ' + a.asset_id);
+      var val = num_(a.value);
+      if (val === '' || val < 0) throw userError_('Meter reading looks wrong.');
+      if (String(ma.CurrentMeter) !== '' && val < Number(ma.CurrentMeter)) throw userError_('Reading is lower than the last one (' + ma.CurrentMeter + ').');
+      setCells_(mt, ma, { CurrentMeter: val, MeterUpdated: new Date(), MeterUnit: ma.MeterUnit || 'h' });
+      return { id: ma.AssetID, meter: val, unit: ma.MeterUnit || 'h' };
+    }
+    case 'find_pm': {
+      var pl = apiPmList_({ token: tok, view: a.view || 'due', q: a.query || '' });
+      return { total: pl.total, tasks: pl.tasks.slice(0, 25).map(function (t) {
+        return { id: t.id, machine: t.assetId + ' ' + t.assetName, title: t.title, freq: t.freq, nextDue: ymd_(t.nextDue), state: t.state,
+          daysLate: t.daysLate, hoursLeft: t.meterLeft, assigned: t.assignedName };
+      }) };
+    }
+    case 'update_pm_task': {
+      var tr = find_(readTable_('PMTasks').rows, 'TaskID', String(a.task_id || ''));
+      if (!tr) throw userError_('PM task not found: ' + a.task_id);
+      var task = { TaskID: String(tr.TaskID), AssetID: String(tr.AssetID), Title: a.title || tr.Title, TemplateID: String(tr.TemplateID || ''), Scope: tr.Scope,
+        FreqUnit: tr.FreqUnit, FreqValue: tr.FreqValue, MeterInterval: tr.MeterInterval, NextDue: ymd_(tr.NextDue), AssignedTo: String(tr.AssignedTo || ''),
+        DoneBy: tr.DoneBy, Active: tr.Active, Notes: tr.Notes };
+      if (a.next_due !== undefined) task.NextDue = a.next_due;
+      if (a.freq_unit !== undefined) task.FreqUnit = a.freq_unit === 'None' ? '' : a.freq_unit;
+      if (a.freq_value !== undefined) task.FreqValue = a.freq_value;
+      if (a.meter_interval !== undefined) task.MeterInterval = a.meter_interval;
+      if (a.done_by !== undefined) task.DoneBy = a.done_by;
+      if (a.notes !== undefined) task.Notes = a.notes;
+      if (a.active !== undefined) task.Active = a.active ? 'Yes' : 'No';
+      if (a.assigned_to !== undefined) {
+        if (/^(none|nobody|-)?$/i.test(String(a.assigned_to))) task.AssignedTo = '';
+        else { var pu = botUser_(a.assigned_to); if (!pu) throw userError_('User not found: ' + a.assigned_to); task.AssignedTo = String(pu.UserID); }
+      }
+      if (task.NextDue && !parseLocal_(task.NextDue)) throw userError_('Date looks wrong: ' + task.NextDue);
+      apiPmSave_({ token: tok, task: task });
+      var after = apiPmTask_({ token: tok, id: task.TaskID });
+      return { id: after.id, title: after.title, nextDue: ymd_(after.nextDue), freq: after.freq, assigned: after.assignedName, active: after.active };
+    }
+    case 'pm_done': {
+      var info = apiPmTask_({ token: tok, id: String(a.task_id || '') });
+      var results = {};
+      var tpl = info.template;
+      if (!tpl && !a.remarks && !a.contractor) throw userError_('Ask the user what was done (or the contractor name).');
+      if (tpl) {
+        var nums = tpl.items.filter(function (it) { return it.type === 'number'; });
+        if (nums.length) throw userError_('This checklist needs readings (' + nums.slice(0, 3).map(function (it) { return it.text; }).join(', ') +
+          '). Please fill it in the app: ' + settings_().APP_URL + 'app.html#pm=' + info.id);
+        var bad = (a.not_ok_items || []).map(function (x) { return String(x).toLowerCase().trim(); }).filter(String);
+        if (!a.all_ok && !bad.length) throw userError_('Ask the user: were all checklist items OK? If not, which ones were Not OK?');
+        var matched = {};
+        var keys = info.children && info.children.length ? info.children.map(function (c) { return c.id; }) : [null];
+        tpl.items.forEach(function (it) {
+          if (it.type !== 'check') return;
+          var hit = bad.filter(function (b) { return String(it.text).toLowerCase().indexOf(b) >= 0 || b.indexOf(String(it.text).toLowerCase()) >= 0; })[0];
+          if (hit) matched[hit] = 1;
+          keys.forEach(function (k) {
+            var kid = k && bad.filter(function (b) { return b.toUpperCase().indexOf(k) >= 0; })[0];
+            if (kid) matched[kid] = 1;
+            results[(k ? k + '|' : '') + it.no] = hit || kid ? 'nok' : 'ok';
+          });
+        });
+        var unknown = bad.filter(function (b) { return !matched[b]; });
+        if (unknown.length) throw userError_('These Not OK items are not on the checklist: ' + unknown.join(', ') + '. Items: ' +
+          tpl.items.map(function (it) { return it.text; }).join('; '));
+      }
+      var done = apiPmComplete_({ token: tok, data: { taskId: info.id, results: results, meter: a.meter, remarks: (a.remarks || '') + ' (via Telegram)',
+        contractor: a.contractor || '', cost: a.cost } });
+      if (a.use_last_photo && ctx.file && ctx.file.kind === 'photo') {
+        var rt = readTable_('PMRecords', true);
+        setCells_(rt, find_(rt.rows, 'RecordID', done.recordId), { Photo: ctx.file.id });
+      }
+      var nt = apiPmTask_({ token: tok, id: info.id });
+      return { record: done.recordId, ok: done.ok, notOk: done.notOk, newJob: done.woId || '', nextDue: ymd_(nt.nextDue) };
+    }
+    case 'add_bill': {
+      if (a.attach_last_file && !ctx.file) throw userError_('No bill photo or PDF was sent. Ask the user to send it, or save without attachment.');
+      var b = saveExpense_(u, { billDate: a.bill_date, type: a.type, amount: a.amount, supplier: a.supplier, billNo: a.bill_no, description: a.description,
+        assetId: a.asset_id, woId: a.job_id, project: a.project }, a.attach_last_file && ctx.file ? ctx.file.id : '', 'Telegram');
+      return b;
+    }
+    case 'cost_report': {
+      var e = expenseQuery_({ from: a.from, to: a.to, type: a.type, project: a.project, assetId: a.asset_id, q: a.query });
+      return { total: e.total, count: e.rows.length, byType: e.byType, byProject: e.byProject.slice(0, 10), byMachine: e.byAsset.slice(0, 10),
+        bySupplier: e.bySupplier.slice(0, 10), latest: e.rows.slice(0, 10).map(function (r) {
+          return { id: r.ExpenseID, date: ymd_(r.BillDate), type: r.Type, amount: Number(r.Amount), supplier: r.Supplier, what: short_(r.Description, 80),
+            machine: r.AssetID, job: r.WO_ID, project: r.Project };
+        }) };
+    }
+    case 'summary': {
+      var dsh = apiDashboard_({ token: tok });
+      return { kpi: dsh.kpi, overdueJobs: dsh.overdue.slice(0, 8).map(job), pmDue: dsh.pmDue.slice(0, 10).map(function (t) { return t.assetId + ' ' + t.title + ' (' + t.state + ')'; }),
+        certificates: dsh.certs.slice(0, 10).map(function (c) { return c.id + ' ' + c.name + ' ' + c.status + ' ' + ymd_(c.expiry); }) };
+    }
+  }
+  throw new Error('Unknown tool ' + name);
 }
 
 /* =========================================================================
@@ -1324,8 +1914,9 @@ function setup() {
 
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (tr) {
-    if (['hourlyTick', 'dailyDigest'].indexOf(tr.getHandlerFunction()) >= 0) ScriptApp.deleteTrigger(tr);
+    if (['hourlyTick', 'dailyDigest', 'telegramPoll'].indexOf(tr.getHandlerFunction()) >= 0) ScriptApp.deleteTrigger(tr);
   });
+  ScriptApp.newTrigger('telegramPoll').timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger('hourlyTick').timeBased().everyHours(1).create();
   ScriptApp.newTrigger('dailyDigest').timeBased().everyDays(1).atHour(7).nearMinute(30).inTimezone(TZ).create();
 }
@@ -1403,6 +1994,21 @@ function completedDate_(v, created) {
 /** Sends a Telegram test message to every linked admin/supervisor. */
 function sendTelegramTest() {
   notifyRoles_(MANAGER_ROLES, '🔔 Test message from TVS Horana CMMS – ' + Utilities.formatDate(new Date(), TZ, 'dd MMM yyyy HH:mm'));
+}
+
+/** Checks the Gemini key (never logs it) and lists the models it can use. */
+function checkAi() {
+  var key = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!key) { Logger.log('GEMINI_API_KEY is not set in Script Properties.'); return; }
+  var res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': key }, muteHttpExceptions: true });
+  if (res.getResponseCode() !== 200) { Logger.log('Key NOT working (' + res.getResponseCode() + '): ' + short_(res.getContentText(), 300)); return; }
+  var models = (JSON.parse(res.getContentText()).models || []).filter(function (m) { return (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0; })
+    .map(function (m) { return String(m.name).replace('models/', ''); }).filter(function (n) { return /flash/.test(n); });
+  var cur = settings_().AI_MODEL;
+  Logger.log('Key OK. Model in Settings: ' + cur + (models.indexOf(cur) >= 0 ? ' (available)' : ' – NOT in the list, change AI_MODEL in Settings'));
+  Logger.log('Flash models for this key: ' + models.join(', '));
+  var r = gemini_(key, cur, { contents: [{ role: 'user', parts: [{ text: 'Reply with the single word OK.' }] }] });
+  Logger.log('Test answer: ' + JSON.stringify(((r.candidates || [])[0] || {}).content || {}).slice(0, 200));
 }
 
 /** Checks the bot token (logs only the bot name, never the token) and lists who has connected Telegram. */

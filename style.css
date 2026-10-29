@@ -62,6 +62,9 @@ header.top .logo {
   background: linear-gradient(135deg, var(--brand-600), var(--brand)); box-shadow: 0 6px 18px rgba(13, 148, 136, .45), inset 0 1px 0 rgba(255, 255, 255, .25);
 }
 header.top .logo svg { width: 22px; height: 22px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+header.top .logo { background: #fff; box-shadow: 0 6px 18px rgba(0, 0, 0, .35); }
+header.top .logo img { width: auto; height: 78%; display: block; }
+.co-logo { height: 34px; width: auto; vertical-align: middle; margin-right: 10px; }
 header.top .brand-text { min-width: 0; display: block; }
 header.top .mark { display: block; white-space: nowrap; font-weight: 800; font-size: 19px; color: #fff; letter-spacing: -.2px; line-height: 1.2; }
 header.top .mark em { font-style: normal; font-weight: 700; font-size: 11px; letter-spacing: .8px; color: var(--brand-400);
@@ -270,7 +273,8 @@ table.simple td.num { text-align: right; font-variant-numeric: tabular-nums; fon
 .label .tx { min-width: 0; }
 .label .lid { font-size: 22px; font-weight: 800; letter-spacing: .5px; }
 .label .lname { font-size: 14px; font-weight: 600; line-height: 1.25; }
-.label .lco { font-size: 10px; color: var(--muted); margin-top: 4px; }
+.label .lco { font-size: 10px; color: var(--muted); margin-top: 4px; display: flex; align-items: center; gap: 5px; }
+.label .lco img { height: 16px; width: auto; }
 .label .lscan { font-size: 11px; margin-top: 6px; border-top: 2px solid var(--brand-600); padding-top: 4px; }
 .pick { display: flex; gap: 8px; align-items: center; padding: 9px 4px; border-bottom: 1px solid #f1f5f9; font-size: 14px; }
 .pick input { width: 20px; height: 20px; flex: none; accent-color: var(--brand); }
@@ -350,3 +354,9 @@ table.iso th, table.iso td { border: 1px solid var(--line); }
   .labels { grid-template-columns: 1fr 1fr; gap: 6mm; }
   .label { height: 45mm; }
 }
+
+/* bills */
+.item.bill { position: relative; }
+.item.bill .bill-th { float: right; width: 56px; height: 56px; object-fit: cover; border-radius: 8px; margin: 0 0 6px 10px; border: 1px solid var(--line, #e2e8f0); }
+.item.bill .amt { margin-left: auto; font-size: 16px; }
+.toolbar .btn { white-space: nowrap; }

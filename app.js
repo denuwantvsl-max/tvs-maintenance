@@ -84,7 +84,6 @@
     k_closed: ['Closed this month', 'මෙම මාසයේ වැසූ'],
     k_avg: ['Avg hours to finish', 'අවසන් කිරීමට සාමාන්‍ය පැය'],
     k_down: ['Downtime this month (h)', 'මෙම මාසයේ නැවතුම් (පැ)'],
-    k_cost: ['Cost this month (LKR)', 'මෙම මාසයේ වියදම (රු.)'],
     k_stopped: ['Production stopped now', 'දැන් නිෂ්පාදනය නැවතී'],
     d_overdue: ['Overdue jobs', 'ප්‍රමාද රැකියා'],
     d_person: ['Open jobs per person', 'පුද්ගලයා අනුව විවෘත රැකියා'],
@@ -162,7 +161,33 @@
     removedDisposed: ['Machine marked as Disposed. Its history is kept.', 'යන්ත්‍රය ඉවත් කළ ලෙස සලකුණු කළා. ඉතිහාසය තබා ඇත.'],
     showDisposed: ['Show removed machines', 'ඉවත් කළ යන්ත්‍ර පෙන්වන්න'],
     showActive: ['Show active machines', 'සක්‍රීය යන්ත්‍ර පෙන්වන්න'],
-    saved: ['Saved.', 'සුරකින ලදී.']
+    saved: ['Saved.', 'සුරකින ලදී.'],
+    dv_ov: ['Overview', 'සාරාංශය'],
+    dv_cost: ['Costs & bills', 'වියදම් සහ බිල්පත්'],
+    k_cost: ['Job costs this month (LKR)', 'මෙම මාසයේ රැකියා වියදම (රු.)'],
+    k_bills: ['Bills this month (LKR)', 'මෙම මාසයේ බිල්පත් (රු.)'],
+    addBill: ['+ Bill', '+ බිල්පත'],
+    newBill: ['New bill', 'නව බිල්පත'],
+    billDate: ['Bill date', 'බිල්පතේ දිනය'],
+    billType: ['Type', 'වර්ගය'],
+    amount: ['Amount (LKR)', 'මුදල (රු.)'],
+    supplier: ['Supplier / shop', 'සැපයුම්කරු / කඩය'],
+    billNo: ['Bill / invoice no.', 'බිල්පත් අංකය'],
+    billWhat: ['What was bought / done', 'මිලදී ගත් / කළ දේ'],
+    jobId: ['Job ID (optional)', 'රැකියා අංකය (අත්‍යවශ්‍ය නැත)'],
+    project: ['Project (optional)', 'ව්‍යාපෘතිය (අත්‍යවශ්‍ය නැත)'],
+    billPhoto: ['Photo of the bill', 'බිල්පතේ ඡායාරූපය'],
+    allTypes: ['All types', 'සියලු වර්ග'],
+    month: ['Month', 'මාසය'],
+    total: ['Total', 'එකතුව'],
+    byType: ['By type', 'වර්ගය අනුව'],
+    byProject: ['By project', 'ව්‍යාපෘතිය අනුව'],
+    byMachine: ['By machine', 'යන්ත්‍රය අනුව'],
+    noBills: ['No bills for this month.', 'මෙම මාසයට බිල්පත් නැත.'],
+    removeBill: ['Remove this bill', 'මෙම බිල්පත ඉවත් කරන්න'],
+    removeBillQ: ['Remove this bill?', 'මෙම බිල්පත ඉවත් කරන්නද?'],
+    viaTg: ['via Telegram', 'Telegram හරහා'],
+    billTgHint: ['Tip: send a photo of a bill to the Telegram bot – it reads the bill and records it for you.', 'ඉඟිය: බිල්පතක ඡායාරූපයක් Telegram bot එකට යවන්න – එය කියවා සටහන් කරයි.']
   });
 
   var S = { user: null, meta: null, users: [], view: 'open', jobs: [], assets: null, area: '', job: null, lblSel: {} };
@@ -277,15 +302,17 @@
     if (!$('tab-jobs').classList.contains('hidden')) loadJobs();
     if (!$('tab-assets').classList.contains('hidden')) { S.assets = null; loadAssets().then(renderAssets); }
     if (!$('tab-pm').classList.contains('hidden')) loadPm();
+    if (!$('tab-dash').classList.contains('hidden') && S.dashView === 'cost') loadCosts();
   });
   function route() {
     var h = location.hash.replace(/^#/, '');
-    var m = /^wo=(.+)$/.exec(h), a = /^asset=(.*)$/.exec(h), pm = /^pm=(.*)$/.exec(h), rec = /^rec=(.+)$/.exec(h), pe = /^pmedit=(.*)$/.exec(h);
+    var m = /^wo=(.+)$/.exec(h), a = /^asset=(.*)$/.exec(h), pm = /^pm=(.*)$/.exec(h), rec = /^rec=(.+)$/.exec(h), pe = /^pmedit=(.*)$/.exec(h), bl = /^bill=(.*)$/.exec(h);
     if (m) openJob(decodeURIComponent(m[1]));
     else if (a) openAsset(decodeURIComponent(a[1]));
     else if (pm) openPm(decodeURIComponent(pm[1]));
     else if (rec) openRecord(decodeURIComponent(rec[1]));
     else if (pe) openPmEditor(decodeURIComponent(pe[1]));
+    else if (bl) openBill(decodeURIComponent(bl[1]));
     else closeSheet();
   }
   window.addEventListener('hashchange', function () { if (S.user) route(); });
@@ -564,14 +591,26 @@
 
   /* ---------------- dashboard ---------------- */
   function loadDash() {
-    var box = $('tab-dash');
+    S.dashView = S.dashView || 'ov';
+    $('tab-dash').innerHTML = '<div class="chips no-print" id="dashViews" style="margin-bottom:10px">' + ['ov', 'cost'].map(function (v) {
+      return '<button type="button" class="chip' + (S.dashView === v ? ' on' : '') + '" data-dv="' + v + '">' + esc(t('dv_' + v)) + '</button>';
+    }).join('') + '</div><div id="dashBody"></div>';
+    $('dashViews').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-dv]'); if (!b) return;
+      S.dashView = b.getAttribute('data-dv'); loadDash();
+    });
+    if (S.dashView === 'cost') loadCosts(); else loadOverview();
+  }
+  function loadOverview() {
+    var box = $('dashBody');
     box.innerHTML = C.loadingHtml();
     C.api('dashboard').then(function (d) {
       var k = d.kpi;
       var tile = function (n, label, alert) { return '<div class="kpi' + (alert && n ? ' alert' : '') + '"><b>' + esc(n === null ? '—' : n) + '</b><span>' + esc(t(label)) + '</span></div>'; };
       var h = '<div class="kpis">' + tile(k.open, 'k_open') + tile(k.overdue, 'k_overdue', true) + tile(k.newCount, 'k_new') + tile(k.stoppedNow, 'k_stopped', true) +
         tile(k.waitingConfirm, 'k_confirm') + tile(k.createdMonth, 'k_created') + tile(k.closedMonth, 'k_closed') + tile(k.avgCloseHours, 'k_avg') +
-        tile(Math.round(k.downtimeMonthMin / 6) / 10, 'k_down') + tile(Math.round(k.costMonth).toLocaleString(), 'k_cost') + '</div>';
+        tile(Math.round(k.downtimeMonthMin / 6) / 10, 'k_down') + tile(Math.round(k.costMonth).toLocaleString(), 'k_cost') +
+        tile(Math.round(k.billsMonth || 0).toLocaleString(), 'k_bills') + '</div>';
       h += '<h2>' + esc(t('d_pm')) + '</h2><div class="kpis">' + tile(k.pmToday, 'k_pmToday') + tile(k.pmOverdue, 'k_pmOverdue', true) +
         tile(k.pmDoneMonth, 'k_pmDone') + tile(k.pmCompliance === null ? null : k.pmCompliance + '%', 'k_pmComp') + '</div>';
       if (d.pmDue && d.pmDue.length) h += '<div class="list" style="margin-top:10px">' + d.pmDue.map(pmCard).join('') + '</div>';
@@ -588,6 +627,102 @@
         }).join('') || '<tr><td>✓</td></tr>') + '</table></div>';
       box.innerHTML = h;
     }).catch(function (e) { handleErr(e); box.innerHTML = ''; });
+  }
+
+  /* ---------------- costs & bills ---------------- */
+  function monthNow() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2); }
+  function money(n) { return Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 }); }
+  function loadCosts() {
+    var box = $('dashBody');
+    if (!box) return;
+    S.costMonth = S.costMonth || monthNow();
+    var mm = S.costMonth.split('-').map(Number);
+    var last = new Date(mm[0], mm[1], 0).getDate();
+    if (!$('cMonth')) {
+      box.innerHTML = '<div class="toolbar"><input type="month" id="cMonth" aria-label="' + esc(t('month')) + '"><select id="cType"></select>' +
+        '<a class="btn sm" href="#bill=">' + esc(t('addBill')) + '</a></div><div id="cOut"></div>';
+      $('cMonth').addEventListener('change', function () { S.costMonth = $('cMonth').value || monthNow(); loadCosts(); });
+      $('cType').addEventListener('change', function () { S.costType = $('cType').value; loadCosts(); });
+    }
+    $('cMonth').value = S.costMonth;
+    $('cOut').innerHTML = C.loadingHtml();
+    C.api('expenses', { from: S.costMonth + '-01', to: S.costMonth + '-' + last, type: S.costType || '' }).then(function (r) {
+      S.costData = r;
+      $('cType').innerHTML = '<option value="">' + esc(t('allTypes')) + '</option>' + r.types.map(function (x) {
+        return '<option' + (x === S.costType ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('');
+      var table = function (title, rows, link) {
+        return '<div class="card"><h3 style="margin-top:0">' + esc(t(title)) + '</h3><table class="simple">' + (rows.map(function (x) {
+          var name = link && x.name !== '(none)' ? '<a href="#asset=' + encodeURIComponent(x.name) + '">' + esc(x.name) + '</a>' : esc(x.name);
+          return '<tr><td>' + name + '</td><td class="num">' + money(x.amount) + '</td></tr>'; }).join('') || '<tr><td>—</td></tr>') + '</table></div>';
+      };
+      var h = '<div class="kpis"><div class="kpi"><b>' + money(r.total) + '</b><span>' + esc(t('total')) + ' (LKR)</span></div><div class="kpi"><b>' + r.count +
+        '</b><span>' + esc(t('dv_cost')) + '</span></div></div>';
+      h += '<p class="hint">' + esc(t('billTgHint')) + '</p>';
+      h += '<div class="list">' + (r.bills.map(function (b) {
+        return '<button type="button" class="item bill" data-bill="' + esc(b.id) + '">' + (b.thumbUrl ? '<img class="bill-th" src="' + esc(b.thumbUrl) + '" alt="" loading="lazy">' : '') +
+          '<div class="top"><span class="id">' + esc(b.id) + '</span><span class="pill">' + esc(b.type) + '</span><b class="amt">' + money(b.amount) + '</b></div>' +
+          '<div class="ttl">' + esc(b.supplier || b.description || '—') + '</div>' + (b.description && b.supplier ? '<div>' + esc(b.description) + '</div>' : '') +
+          '<div class="meta">' + esc(C.fmtDate(b.billDate, false)) + (b.assetId ? ' · 🔧 ' + esc(b.assetId) : '') + (b.woId ? ' · ' + esc(b.woId) : '') +
+          (b.project ? ' · 📁 ' + esc(b.project) : '') + ' · 👤 ' + esc(b.enteredBy) + (b.source === 'Telegram' ? ' · ' + esc(t('viaTg')) : '') + '</div></button>';
+      }).join('') || '<div class="muted center" style="padding:24px">' + esc(t('noBills')) + '</div>') + '</div>';
+      if (r.count) h += table('byType', r.byType) + table('byProject', r.byProject) + table('byMachine', r.byAsset, true);
+      $('cOut').innerHTML = h;
+    }).catch(function (e) { handleErr(e); if ($('cOut')) $('cOut').innerHTML = ''; });
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-bill]');
+    if (b) { e.preventDefault(); location.hash = 'bill=' + b.getAttribute('data-bill'); }
+  });
+  function openBill(id) {
+    openSheet(id || t('newBill'), C.loadingHtml());
+    var have = S.costData ? Promise.resolve(S.costData) : C.api('expenses', { from: monthNow() + '-01' });
+    var get = id ? C.api('expenses', { q: id }) : Promise.resolve(null);
+    Promise.all([have, get]).then(function (r) {
+      var meta = r[0], b = id ? r[1].bills.filter(function (x) { return x.id === id; })[0] : null;
+      if (id && !b) throw new Error('Bill not found: ' + id);
+      b = b || { billDate: new Date().toISOString(), type: '', amount: '', supplier: '', billNo: '', description: '', assetId: '', woId: '', project: '' };
+      var canEdit = !id || isMgr() || b.enteredBy === S.user.name;
+      var dis = canEdit ? '' : ' disabled';
+      var photo = null;
+      var h = '<div class="card">' +
+        (b.fileUrl ? '<div class="photos" style="margin-bottom:10px"><a href="' + esc(b.fileUrl) + '" target="_blank" rel="noopener"><img src="' + esc(b.thumbUrl) + '" alt=""></a></div>' : '') +
+        '<div class="grid2"><div>' + field('bl_date', t('billDate') + ' *', '<input type="date" id="bl_date" value="' + esc(C.toLocalInput(b.billDate, true)) + '"' + dis + '>') + '</div><div>' +
+        field('bl_amt', t('amount') + ' *', '<input type="text" id="bl_amt" inputmode="decimal" value="' + esc(b.amount) + '"' + dis + '>') + '</div></div>' +
+        field('bl_type', t('billType') + ' *', '<select id="bl_type"' + dis + '>' + opts(meta.types, b.type, true) + '</select>') +
+        field('bl_sup', t('supplier'), '<input type="text" id="bl_sup" maxlength="100" value="' + esc(b.supplier) + '"' + dis + '>') +
+        field('bl_no', t('billNo'), '<input type="text" id="bl_no" maxlength="40" value="' + esc(b.billNo) + '"' + dis + '>') +
+        field('bl_desc', t('billWhat'), '<textarea id="bl_desc" maxlength="500" style="min-height:70px"' + dis + '>' + esc(b.description) + '</textarea>') +
+        field('bl_asset', t('machine'), '<input type="text" id="bl_asset" list="blAssets" autocomplete="off" value="' + esc(b.assetId) + '"' + dis + '><datalist id="blAssets">' +
+          (S.meta ? S.meta.assets : []).map(function (a) { return '<option value="' + esc(a.id) + '">' + esc(a.name) + '</option>'; }).join('') + '</datalist>') +
+        field('bl_wo', t('jobId'), '<input type="text" id="bl_wo" maxlength="20" value="' + esc(b.woId) + '"' + dis + '>') +
+        field('bl_proj', t('project'), '<input type="text" id="bl_proj" list="blProj" maxlength="80" value="' + esc(b.project) + '"' + dis + '><datalist id="blProj">' +
+          meta.projects.map(function (p) { return '<option value="' + esc(p) + '">'; }).join('') + '</datalist>') +
+        (canEdit ? field('bl_photo', t('billPhoto'), '<input type="file" id="bl_photo" accept="image/*"><img id="blPrev" class="hidden" style="max-width:160px;margin-top:8px;border-radius:8px" alt="">') +
+          '<div id="blErr" class="hidden"></div><div style="margin-top:16px"><button class="btn dark" id="blSave" type="button">' + esc(t('save')) + '</button></div>' : '') +
+        (id ? '<p class="muted small">' + esc(b.enteredBy) + (b.source === 'Telegram' ? ' · ' + esc(t('viaTg')) : '') + '</p>' : '') + '</div>' +
+        (id && isMgr() ? '<button class="btn ghost" id="blRemove" type="button">' + esc(t('removeBill')) + '</button>' : '');
+      $('sheetBody').innerHTML = h;
+      if ($('bl_photo')) $('bl_photo').addEventListener('change', function () {
+        var f = this.files[0]; if (!f) return;
+        C.shrinkPhoto(f, 1600).then(function (d) { photo = d; $('blPrev').src = d; $('blPrev').classList.remove('hidden'); });
+      });
+      var done = function () {
+        S.costData = null; history.pushState(null, '', location.pathname + location.search); closeSheet();
+        S.dashView = 'cost'; showTab('dash');
+      };
+      if ($('blSave')) $('blSave').addEventListener('click', function () {
+        var v = function (k) { return $(k).value.trim(); };
+        var bill = { id: id || '', billDate: v('bl_date'), amount: v('bl_amt'), type: v('bl_type'), supplier: v('bl_sup'), billNo: v('bl_no'),
+          description: v('bl_desc'), assetId: v('bl_asset').split(' ')[0], woId: v('bl_wo'), project: v('bl_proj') };
+        $('blSave').disabled = true;
+        C.api('expenseSave', { bill: bill, photo: photo }).then(done)
+          .catch(function (e) { handleErr(e, $('blErr')); $('blSave').disabled = false; });
+      });
+      if ($('blRemove')) $('blRemove').addEventListener('click', function () {
+        if (!confirm(t('removeBillQ'))) return;
+        C.api('expenseRemove', { id: id }).then(done).catch(function (e) { handleErr(e); });
+      });
+    }).catch(function (e) { if (e.auth) return handleErr(e); $('sheetBody').innerHTML = '<div class="msg err">' + esc(e.message) + '</div>'; });
   }
 
   /* ---------------- preventive maintenance ---------------- */
@@ -756,7 +891,7 @@
     openSheet(id, C.loadingHtml());
     C.api('pmRecord', { id: id }).then(function (r) {
       var sh = r.sheet, h = '<div class="iso-rec card">';
-      h += '<div class="iso-head"><div><b>TVS Lanka (Pvt.) Ltd</b><br><span class="muted small">QUALITY MANAGEMENT SYSTEM · Vehicle Assembly Complex – Horana</span></div>' +
+      h += '<div class="iso-head"><div style="display:flex;align-items:center"><img class="co-logo" src="img/tvs-logo.png" alt="TVS"><div><b>TVS Lanka (Pvt.) Ltd</b><br><span class="muted small">QUALITY MANAGEMENT SYSTEM · Vehicle Assembly Complex – Horana</span></div></div>' +
         '<div class="iso-doc">' + esc(sh ? sh.doc || '' : 'PM service record') + '</div></div>';
       h += '<h2 style="margin:10px 0">' + esc(sh ? sh.title : r.title) + '</h2><dl class="kv">' + kv(t('pmRecordNo'), r.id) +
         kv(t('machine'), r.assetId + ' — ' + r.assetName) + kv(t('location'), r.location) + kv(t('pmTask'), r.title) +
@@ -860,7 +995,7 @@
       var out = $('lblOut');
       out.innerHTML = ids.map(function (a, i) {
         return '<div class="label"><div class="qr" id="qr' + i + '"></div><div class="tx"><div class="lid">' + esc(a.AssetID) + '</div><div class="lname">' +
-          esc(a.Name) + '</div><div class="lscan">' + esc(C.t('scanLabel')) + '</div><div class="lco">TVS Lanka (Pvt.) Ltd · Horana</div></div></div>';
+          esc(a.Name) + '</div><div class="lscan">' + esc(C.t('scanLabel')) + '</div><div class="lco"><img src="img/tvs-logo.png" alt=""> TVS Lanka (Pvt.) Ltd · Horana</div></div></div>';
       }).join('');
       ids.forEach(function (a, i) {
         /* global QRCode */

@@ -34,7 +34,7 @@ function rowsOf(tab) { TABLE_CACHE_ = {}; return readTable_(tab).rows; }
 setup();
 setup(); // must be safe to run twice
 assert.deepStrictEqual(F.active.sheets.map(s => s.name).sort(), Object.keys(TABLES).sort());
-assert.strictEqual(F.triggers.length, 2);
+assert.strictEqual(F.triggers.length, 3);
 assert.strictEqual(rowsOf('Users').length, 3);
 assert.strictEqual(rowsOf('Settings').length, DEFAULT_SETTINGS.length);
 DEMO_DATA.assets.forEach(a => appendObj_('Assets', a));
