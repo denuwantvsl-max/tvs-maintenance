@@ -187,7 +187,7 @@ assert.match(lastToolResults()[0].id, /^WO-/);
 // AI quota / errors are explained, not crashed
 F.gemini = () => ({ __code: 429, error: { message: 'quota' } });
 assert.match(say(111, 'hi'), /free AI limit/);
-F.gemini = () => ({ __code: 500, error: { message: 'boom' } });
+F.gemini = () => ({ __code: 400, error: { message: 'boom' } });
 assert.match(say(111, 'hi'), /assistant had a problem/);
 assert.ok(rowsOf('BotLog').length > 10, 'conversations logged');
 // /reset clears memory
@@ -213,5 +213,44 @@ say(111, 'and again');
 assert.strictEqual(F.geminiCalls.length, 1, 'remembers that the model refuses it');
 assert.ok(!F.geminiCalls[0].generationConfig.thinkingConfig);
 passed += 7;
+
+// Google busy: asks again; still busy → backup model (and keeps using it); no backup → friendly message
+const busy = { __code: 503, error: { message: 'This model is currently experiencing high demand.' } };
+const answer = t => ({ candidates: [{ content: { role: 'model', parts: [{ text: t }] } }] });
+let n503 = 0;
+F.gemini = () => (n503++ < 2 ? busy : answer('Two forklifts.'));
+F.geminiCalls = [];
+assert.strictEqual(say(111, 'forklifts?'), 'Two forklifts.');
+assert.strictEqual(F.geminiCalls.length, 3, 'asked again after busy');
+F.gemini = () => busy;
+assert.match(say(111, 'forklifts?'), /very busy right now/);
+appendObj_('Settings', { Key: 'AI_MODEL_BACKUP', Value: 'backup-model', Description: '' });
+const models = [];
+const origFetch = UrlFetchApp.fetch;
+UrlFetchApp.fetch = function (url, o) {
+  if (url.indexOf('generativelanguage') >= 0) models.push(/models\/([^:]+)/.exec(url)[1]);
+  return origFetch.apply(this, arguments);
+};
+F.gemini = () => (models[models.length - 1] === 'backup-model' ? answer('From backup.') : busy);
+script = [];
+assert.strictEqual(say(111, 'forklifts?'), 'From backup.');
+assert.deepStrictEqual(models, ['gemini-3.8-flash', 'gemini-3.8-flash', 'gemini-3.8-flash', 'backup-model']);
+// limit used up on the main model → straight to the backup
+models.length = 0;
+F.gemini = () => (models[models.length - 1] === 'backup-model' ? answer('Backup again.') : { __code: 429, error: { message: 'quota' } });
+assert.strictEqual(say(111, 'hi'), 'Backup again.');
+assert.deepStrictEqual(models, ['gemini-3.8-flash', 'backup-model']);
+// tool rounds stay on the backup model once it was used
+models.length = 0;
+let first = true;
+F.gemini = () => {
+  if (models[models.length - 1] !== 'backup-model') return busy;
+  if (first) { first = false; return { candidates: [{ content: { role: 'model', parts: [{ functionCall: { name: 'summary', args: {} } }] } }] }; }
+  return answer('Summary from backup.');
+};
+assert.strictEqual(say(111, 'summary'), 'Summary from backup.');
+assert.deepStrictEqual(models.slice(3), ['backup-model', 'backup-model']);
+UrlFetchApp.fetch = origFetch;
+passed += 9;
 
 console.log('All bot / cost tests passed (' + passed + ' checks).');

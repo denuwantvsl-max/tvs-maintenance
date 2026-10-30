@@ -69,6 +69,7 @@ var DEFAULT_SETTINGS = [
   ['PM_SOON_DAYS', '7', 'PM tasks due within this many days show as "coming up"'],
   ['EXPENSE_TYPES', 'Repair,PM / Service,Spare parts,Tool purchase,Contractor,Project,Consumables,Other', 'Bill / cost types (comma separated)'],
   ['AI_MODEL', 'gemini-3.8-flash', 'Gemini model used by the Telegram assistant (run checkAi to list the ones your key can use)'],
+  ['AI_MODEL_BACKUP', '', 'Second Gemini model, used when the main one is busy or its free limit is used up (blank = none)'],
   ['AI_THINKING', 'low', 'How long the assistant thinks before it answers: minimal, low (fast), medium or high (slow); blank = model default']
 ];
 
@@ -1533,8 +1534,31 @@ function thinkingConfig_(model, level) {
   return { thinkingLevel: level };
 }
 
-/** Calls Gemini; if the model refuses the thinking setting, asks again without it and remembers that for 6 h. */
-function geminiAsk_(key, model, body, thinking) {
+/**
+ * Calls Gemini for the assistant. When Google is busy (500/502/503/504) it waits and asks again (3 tries); if still busy, or the
+ * free limit of the main model is used up, it switches to AI_MODEL_BACKUP (when set) for the rest of this message.
+ * ai = { key, model, backup, thinking } – ai.model is changed to the backup model once it has been used.
+ */
+function geminiAsk_(ai, body) {
+  var last;
+  while (true) {
+    for (var i = 0; i < 3; i++) {
+      if (i) Utilities.sleep(i * 3000);
+      try { return geminiOnce_(ai.key, ai.model, body, ai.thinking); } catch (err) {
+        last = err;
+        if (err.code === 429) break; // limit used up: waiting does not help, try the backup model
+        if ([500, 502, 503, 504].indexOf(err.code) < 0) throw err;
+      }
+    }
+    if (!ai.backup || ai.backup === ai.model) break;
+    ai.model = ai.backup; ai.backup = '';
+  }
+  if (last.code === 429) throw userError_('The free AI limit is used up for now. Try again later.');
+  throw userError_('Google\'s AI is very busy right now. Please try again in a few minutes.');
+}
+
+/** One Gemini call; if the model refuses the thinking setting, asks again without it and remembers that for 6 h. */
+function geminiOnce_(key, model, body, thinking) {
   var cache = CacheService.getScriptCache(), skip = 'nothink_' + model;
   var tc = cache.get(skip) ? null : thinkingConfig_(model, thinking);
   if (!tc) return gemini_(key, model, body);
@@ -1555,14 +1579,17 @@ function gemini_(key, model, body) {
   var code = res.getResponseCode();
   var out = {};
   try { out = JSON.parse(res.getContentText()); } catch (e) { out = {}; }
-  if (code === 429) throw userError_('The free AI limit is used up for now. Try again later, or use the app.');
-  if (code !== 200) throw new Error('Gemini ' + code + ': ' + short_((out.error && out.error.message) || res.getContentText(), 300));
+  if (code !== 200) {
+    var err = new Error('Gemini ' + code + ': ' + short_((out.error && out.error.message) || res.getContentText(), 300));
+    err.code = code;
+    throw err;
+  }
   return out;
 }
 
 function botAi_(u, chatId, text, file, key) {
   var s = settings_();
-  var model = s.AI_MODEL || 'gemini-3.8-flash';
+  var ai = { key: key, model: s.AI_MODEL || 'gemini-3.8-flash', backup: s.AI_MODEL_BACKUP || '', thinking: s.AI_THINKING };
   var hist = botMemory_(chatId);
   var lastFile = null;
   try { lastFile = JSON.parse(CacheService.getScriptCache().get('tgf_' + chatId) || 'null'); } catch (e) { lastFile = null; }
@@ -1574,8 +1601,8 @@ function botAi_(u, chatId, text, file, key) {
   var ctx = { user: u, token: makeToken_(String(u.UserID)), file: file || lastFile, actions: [] };
   var reply = '', sys = botSystem_(u, s);
   for (var round = 0; round < 6; round++) {
-    var res = geminiAsk_(key, model, { systemInstruction: { parts: [{ text: sys }] }, contents: contents,
-      tools: [{ functionDeclarations: BOT_TOOLS }], generationConfig: { temperature: 0.2 } }, s.AI_THINKING);
+    var res = geminiAsk_(ai, { systemInstruction: { parts: [{ text: sys }] }, contents: contents,
+      tools: [{ functionDeclarations: BOT_TOOLS }], generationConfig: { temperature: 0.2 } });
     var content = res.candidates && res.candidates[0] && res.candidates[0].content;
     if (!content || !content.parts) { reply = 'Sorry, I could not answer that. Please say it in other words.'; break; }
     contents.push(content);
@@ -2028,13 +2055,20 @@ function checkAi() {
   if (res.getResponseCode() !== 200) { Logger.log('Key NOT working (' + res.getResponseCode() + '): ' + short_(res.getContentText(), 300)); return; }
   var models = (JSON.parse(res.getContentText()).models || []).filter(function (m) { return (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0; })
     .map(function (m) { return String(m.name).replace('models/', ''); }).filter(function (n) { return /flash/.test(n); });
-  var s = settings_(), cur = s.AI_MODEL;
-  Logger.log('Key OK. Model in Settings: ' + cur + (models.indexOf(cur) >= 0 ? ' (available)' : ' – NOT in the list, change AI_MODEL in Settings'));
+  var s = settings_();
+  [['AI_MODEL', s.AI_MODEL], ['AI_MODEL_BACKUP', s.AI_MODEL_BACKUP]].forEach(function (m) {
+    if (m[1]) Logger.log(m[0] + ' in Settings: ' + m[1] + (models.indexOf(m[1]) >= 0 ? ' (available)' : ' – NOT in the list, change it in Settings'));
+  });
   Logger.log('Flash models for this key: ' + models.join(', '));
-  var t0 = Date.now();
-  var r = geminiAsk_(key, cur, { contents: [{ role: 'user', parts: [{ text: 'Reply with the single word OK.' }] }] }, s.AI_THINKING);
-  Logger.log('Test answer (' + ((Date.now() - t0) / 1000).toFixed(1) + ' s, thinking ' + (s.AI_THINKING || 'default') + '): ' +
-    JSON.stringify(((r.candidates || [])[0] || {}).content || {}).slice(0, 200));
+  // test every text flash model once (with the AI_THINKING setting), so a working backup can be chosen
+  models.filter(function (m) { return !/tts|image|live|audio|embed/.test(m); }).slice(0, 10).forEach(function (m) {
+    var t0 = Date.now(), r;
+    try {
+      r = geminiOnce_(key, m, { contents: [{ role: 'user', parts: [{ text: 'Reply with the single word OK.' }] }] }, s.AI_THINKING);
+      var txt = (((r.candidates || [])[0] || {}).content || {}).parts || [];
+      Logger.log(m + ': answered in ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s – ' + short_(txt.map(function (p) { return p.thought ? '' : p.text || ''; }).join(''), 40));
+    } catch (err) { Logger.log(m + ': FAILED – ' + short_(err.message, 120)); }
+  });
 }
 
 /** Checks the bot token (logs only the bot name, never the token) and lists who has connected Telegram. */
