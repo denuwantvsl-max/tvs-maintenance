@@ -68,7 +68,8 @@ var DEFAULT_SETTINGS = [
   ['CERT_ALERT_DAYS', '60,30,7,1', 'Telegram alert this many days before an inspection certificate expires'],
   ['PM_SOON_DAYS', '7', 'PM tasks due within this many days show as "coming up"'],
   ['EXPENSE_TYPES', 'Repair,PM / Service,Spare parts,Tool purchase,Contractor,Project,Consumables,Other', 'Bill / cost types (comma separated)'],
-  ['AI_MODEL', 'gemini-2.5-flash', 'Gemini model used by the Telegram assistant (run checkAi to list the ones your key can use)']
+  ['AI_MODEL', 'gemini-3.8-flash', 'Gemini model used by the Telegram assistant (run checkAi to list the ones your key can use)'],
+  ['AI_THINKING', 'low', 'How long the assistant thinks before it answers: minimal, low (fast), medium or high (slow); blank = model default']
 ];
 
 var PRIORITIES = ['Very Urgent', 'Urgent', 'General'];
@@ -1524,6 +1525,29 @@ var BOT_TOOLS = [
   { name: 'summary', description: 'Plant maintenance summary: open / overdue jobs, PM due, compliance, certificates, costs this month.' }
 ];
 
+/** generationConfig.thinkingConfig for the AI_THINKING setting (Gemini 2.x takes a token budget, newer models a level). */
+function thinkingConfig_(model, level) {
+  level = String(level || '').trim().toLowerCase();
+  if (['minimal', 'low', 'medium', 'high'].indexOf(level) < 0) return null;
+  if (/gemini-2\./.test(model)) return { thinkingBudget: { minimal: 0, low: 512, medium: 4096, high: -1 }[level] };
+  return { thinkingLevel: level };
+}
+
+/** Calls Gemini; if the model refuses the thinking setting, asks again without it and remembers that for 6 h. */
+function geminiAsk_(key, model, body, thinking) {
+  var cache = CacheService.getScriptCache(), skip = 'nothink_' + model;
+  var tc = cache.get(skip) ? null : thinkingConfig_(model, thinking);
+  if (!tc) return gemini_(key, model, body);
+  var withTc = JSON.parse(JSON.stringify(body));
+  withTc.generationConfig = withTc.generationConfig || {};
+  withTc.generationConfig.thinkingConfig = tc;
+  try { return gemini_(key, model, withTc); } catch (err) {
+    if (err.userError || !/^Gemini 400/.test(err.message) || !/think/i.test(err.message)) throw err;
+    cache.put(skip, '1', 21600);
+    return gemini_(key, model, body);
+  }
+}
+
 function gemini_(key, model, body) {
   var res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
     method: 'post', contentType: 'application/json', headers: { 'x-goog-api-key': key }, payload: JSON.stringify(body), muteHttpExceptions: true
@@ -1538,7 +1562,7 @@ function gemini_(key, model, body) {
 
 function botAi_(u, chatId, text, file, key) {
   var s = settings_();
-  var model = s.AI_MODEL || 'gemini-2.5-flash';
+  var model = s.AI_MODEL || 'gemini-3.8-flash';
   var hist = botMemory_(chatId);
   var lastFile = null;
   try { lastFile = JSON.parse(CacheService.getScriptCache().get('tgf_' + chatId) || 'null'); } catch (e) { lastFile = null; }
@@ -1550,8 +1574,8 @@ function botAi_(u, chatId, text, file, key) {
   var ctx = { user: u, token: makeToken_(String(u.UserID)), file: file || lastFile, actions: [] };
   var reply = '', sys = botSystem_(u, s);
   for (var round = 0; round < 6; round++) {
-    var res = gemini_(key, model, { systemInstruction: { parts: [{ text: sys }] }, contents: contents,
-      tools: [{ functionDeclarations: BOT_TOOLS }], generationConfig: { temperature: 0.2 } });
+    var res = geminiAsk_(key, model, { systemInstruction: { parts: [{ text: sys }] }, contents: contents,
+      tools: [{ functionDeclarations: BOT_TOOLS }], generationConfig: { temperature: 0.2 } }, s.AI_THINKING);
     var content = res.candidates && res.candidates[0] && res.candidates[0].content;
     if (!content || !content.parts) { reply = 'Sorry, I could not answer that. Please say it in other words.'; break; }
     contents.push(content);
@@ -2004,11 +2028,13 @@ function checkAi() {
   if (res.getResponseCode() !== 200) { Logger.log('Key NOT working (' + res.getResponseCode() + '): ' + short_(res.getContentText(), 300)); return; }
   var models = (JSON.parse(res.getContentText()).models || []).filter(function (m) { return (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0; })
     .map(function (m) { return String(m.name).replace('models/', ''); }).filter(function (n) { return /flash/.test(n); });
-  var cur = settings_().AI_MODEL;
+  var s = settings_(), cur = s.AI_MODEL;
   Logger.log('Key OK. Model in Settings: ' + cur + (models.indexOf(cur) >= 0 ? ' (available)' : ' – NOT in the list, change AI_MODEL in Settings'));
   Logger.log('Flash models for this key: ' + models.join(', '));
-  var r = gemini_(key, cur, { contents: [{ role: 'user', parts: [{ text: 'Reply with the single word OK.' }] }] });
-  Logger.log('Test answer: ' + JSON.stringify(((r.candidates || [])[0] || {}).content || {}).slice(0, 200));
+  var t0 = Date.now();
+  var r = geminiAsk_(key, cur, { contents: [{ role: 'user', parts: [{ text: 'Reply with the single word OK.' }] }] }, s.AI_THINKING);
+  Logger.log('Test answer (' + ((Date.now() - t0) / 1000).toFixed(1) + ' s, thinking ' + (s.AI_THINKING || 'default') + '): ' +
+    JSON.stringify(((r.candidates || [])[0] || {}).content || {}).slice(0, 200));
 }
 
 /** Checks the bot token (logs only the bot name, never the token) and lists who has connected Telegram. */

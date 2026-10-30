@@ -197,4 +197,21 @@ say(111, 'hello');
 assert.strictEqual(F.geminiCalls[0].contents.length, 1, 'memory cleared');
 passed += 30;
 
+// thinking setting: low by default, budget for 2.x models, retried without it if the model refuses
+assert.deepStrictEqual(F.geminiCalls[0].generationConfig.thinkingConfig, { thinkingLevel: 'low' });
+assert.strictEqual(F.geminiCalls[0].generationConfig.temperature, 0.2, 'other settings kept');
+assert.deepStrictEqual(thinkingConfig_('gemini-2.5-flash', 'low'), { thinkingBudget: 512 });
+assert.strictEqual(thinkingConfig_('gemini-3.8-flash', ''), null);
+F.geminiCalls = [];
+F.gemini = p => p.generationConfig && p.generationConfig.thinkingConfig
+  ? { __code: 400, error: { message: 'Thinking level is not supported for this model.' } }
+  : { candidates: [{ content: { role: 'model', parts: [{ text: 'Hi' }] } }] };
+assert.strictEqual(say(111, 'hello again'), 'Hi');
+assert.strictEqual(F.geminiCalls.length, 2, 'asked again without the thinking setting');
+F.geminiCalls = [];
+say(111, 'and again');
+assert.strictEqual(F.geminiCalls.length, 1, 'remembers that the model refuses it');
+assert.ok(!F.geminiCalls[0].generationConfig.thinkingConfig);
+passed += 7;
+
 console.log('All bot / cost tests passed (' + passed + ' checks).');
