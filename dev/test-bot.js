@@ -253,4 +253,28 @@ assert.deepStrictEqual(models.slice(3), ['backup-model', 'backup-model']);
 UrlFetchApp.fetch = origFetch;
 passed += 9;
 
+// rating plate → specs merged (existing lines kept, same label updated), plate is not set as the machine photo
+assert.strictEqual(mergeSpecs_('Type: Diesel\nRating: 250 kVA', 'rating: 250 kVA / 200 kW\nVoltage: 415 V'), 'Type: Diesel\nRating: 250 kVA / 200 kW\nVoltage: 415 V');
+assert.strictEqual(mergeSpecs_('', 'Voltage: 415 V\n\nVoltage: 415 V'), 'Voltage: 415 V');
+assert.match(F.geminiCalls.length ? botSystem_(find_(rowsOf('Users'), 'UserID', 'U02'), settings_()) : '', /NOT the machine photo/);
+F.gemini = null; F.geminiCalls = [];
+const ps = find_(rowsOf('Assets'), 'AssetID', 'EN-PS-06');
+const photoBefore = ps.Photo || '';
+setCells_(readTable_('Assets', true), ps, { Specs: 'Type: Diesel generator\nRating: 250 kVA' });
+script = ['I read: Greaves, rating 250 kVA / 200 kW, 415 V. Save?'];
+F.gemini = () => {
+  const step = script.shift();
+  if (typeof step === 'string') return answer(step);
+  return { candidates: [{ content: { role: 'model', parts: step.map(c => ({ functionCall: { name: c[0], args: c[1] } })) } }] };
+};
+say(222, 'EN-PS-06 rating plate', { photo: [{ file_id: 'plate' }] });
+script = [[['save_machine', { id: 'EN-PS-06', serial_no: 'GX-77', specs_add: 'Rating: 250 kVA / 200 kW\nVoltage: 415 V' }]], 'Saved.'];
+assert.strictEqual(say(222, 'save'), 'Saved.');
+const ps2 = find_(rowsOf('Assets'), 'AssetID', 'EN-PS-06');
+assert.strictEqual(ps2.Specs, 'Type: Diesel generator\nRating: 250 kVA / 200 kW\nVoltage: 415 V');
+assert.strictEqual(String(ps2.SerialNo), 'GX-77');
+assert.strictEqual(ps2.Photo || '', photoBefore, 'rating plate not used as machine photo');
+assert.match(lastToolResults()[0].specs, /Voltage: 415 V/);
+passed += 7;
+
 console.log('All bot / cost tests passed (' + passed + ' checks).');

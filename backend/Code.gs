@@ -1397,7 +1397,8 @@ function botHelp_() {
     '• What jobs are overdue?\n• WO-2026-0012 done, replaced the motor bearing, cost 4500\n• Assign MWRF123 to Gayan\n' +
     '• Set next due of the compressor PM to 5 Nov\n• Forklift hour meter 1250\n• Generator monthly check done, all OK\n' +
     '• Send a photo of a bill → I read it and record the cost (repair, tools, spare parts, project …)\n' +
-    '• Send a machine photo with "EN-CA-01 photo" → set as the machine photo\n• How much did we spend this month on tools?\n\n' +
+    '• Send a machine photo with "EN-CA-01 photo" → set as the machine photo\n' +
+    '• Send a rating plate / manual page with "EN-PS-01 rating plate" → I read it, show it and update the specs after you say yes\n• How much did we spend this month on tools?\n\n' +
     '/reset – forget the conversation · /help – this message';
 }
 
@@ -1464,7 +1465,11 @@ function botSystem_(u, s) {
     '- Use the tools to read and change data. Never invent IDs, numbers, dates or results. If a tool returns an error, explain it simply.',
     '- Changes (job actions, new jobs, machine edits, PM updates, PM done, meter readings, bills): if the request is clear, do it and then say exactly what was saved, with the ID. If the machine, job, amount or anything important is unclear, ask one short question first. Search before guessing an ID.',
     '- Bills / receipts / invoices (photo or PDF): read supplier, bill date, bill number, total amount in LKR and the main items. Show them, propose the type and the machine, job or project, and ask "Save?". Save with add_bill (attach_last_file=true) only after the user agrees. Never save the same bill twice.',
-    '- A machine photo sent with a machine ID: use save_machine with use_last_photo=true.',
+    '- A photo of the whole machine sent with a machine ID ("EN-CA-01 photo"): use save_machine with use_last_photo=true.',
+    '- Rating plate / nameplate / manual / certificate / spec sheet (photo or PDF) for a machine: this is NOT the machine photo (never use use_last_photo). ' +
+      'First call get_machine, then show what you read (make, model, serial no, year and spec lines "Label: value") next to what is already saved, ' +
+      'point out anything that differs, and ask "Save?". Save only after the user agrees, with make/model/serial_no/year and specs_add ' +
+      '(adds or updates lines, keeps the other existing specs). Use specs (replace all) only if the user asks to rewrite the specs. Never guess unreadable values – say what you could not read.',
     '- PM checklists: mark done only when the user clearly says the check was done (all OK, or which items were Not OK). Never assume.',
     '- You cannot change the website design or program code. For that, tell the user to ask Denuwan to have it changed by the developer.',
     '- Use yyyy-mm-dd dates in tool calls. Money is LKR. Job IDs look like WO-2026-0001 or MWRF123; machine IDs like EN-CA-01, PD-AL-02, QIP08-001.',
@@ -1498,9 +1503,11 @@ var BOT_TOOLS = [
     parameters: { type: 'OBJECT', properties: {
       id: { type: 'STRING' }, is_new: { type: 'BOOLEAN' }, name: { type: 'STRING' }, area: { type: 'STRING' }, location: { type: 'STRING' },
       category: { type: 'STRING' }, parent_id: { type: 'STRING' }, make: { type: 'STRING' }, model: { type: 'STRING' }, serial_no: { type: 'STRING' },
-      year: { type: 'STRING' }, specs: { type: 'STRING' }, criticality: { type: 'STRING', enum: ['A', 'B', 'C'] }, status: { type: 'STRING', enum: ['Active', 'Standby', 'Under repair', 'Disposed'] },
+      year: { type: 'STRING' }, specs: { type: 'STRING', description: 'REPLACES all specs – only when the user asks to rewrite them' },
+      specs_add: { type: 'STRING', description: 'spec lines "Label: value", one per line; added to the existing specs (a line with the same label is updated, others are kept)' },
+      criticality: { type: 'STRING', enum: ['A', 'B', 'C'] }, status: { type: 'STRING', enum: ['Active', 'Standby', 'Under repair', 'Disposed'] },
       maintained_by: { type: 'STRING' }, notes: { type: 'STRING' }, meter_unit: { type: 'STRING' }, cert_expiry: { type: 'STRING', description: 'yyyy-mm-dd' },
-      use_last_photo: { type: 'BOOLEAN', description: 'set the photo the user just sent as the machine photo' } }, required: ['id'] } },
+      use_last_photo: { type: 'BOOLEAN', description: 'set the photo the user just sent as the machine photo (only a photo of the whole machine, never a rating plate or document)' } }, required: ['id'] } },
   { name: 'remove_machine', description: 'Remove a machine (kept as Disposed if it has history). Admin / supervisor only.', parameters: { type: 'OBJECT', properties: { id: { type: 'STRING' }, reason: { type: 'STRING' } }, required: ['id'] } },
   { name: 'set_meter', description: 'Record the hour meter reading of a machine (forklift, generator, compressor).', parameters: { type: 'OBJECT', properties: { asset_id: { type: 'STRING' }, value: { type: 'NUMBER' } }, required: ['asset_id', 'value'] } },
   { name: 'find_pm', description: 'List preventive maintenance (PM) tasks.', parameters: { type: 'OBJECT', properties: {
@@ -1635,6 +1642,21 @@ function botUser_(v) {
 
 function ymd_(v) { return v ? Utilities.formatDate(new Date(dateNum_(v)), TZ, 'yyyy-MM-dd') : ''; }
 
+/** Adds spec lines ("Label: value") to existing specs: a line with the same label (any case) is replaced, other lines are kept. */
+function mergeSpecs_(old, add) {
+  var label = function (l) { var m = /^\s*([^:]{1,40}):/.exec(l); return m ? m[1].trim().toLowerCase() : null; };
+  var lines = String(old || '').split('\n').filter(function (l) { return l.trim(); });
+  String(add || '').split('\n').forEach(function (l) {
+    l = l.trim();
+    if (!l) return;
+    var k = label(l), i = -1;
+    if (k) lines.forEach(function (x, j) { if (i < 0 && label(x) === k) i = j; });
+    if (i >= 0) lines[i] = lines[i].slice(0, lines[i].indexOf(':')) + l.slice(l.indexOf(':')); // keep the existing label spelling
+    else if (lines.indexOf(l) < 0) lines.push(l);
+  });
+  return lines.join('\n');
+}
+
 function runBotTool_(name, a, ctx) {
   var tok = ctx.token, u = ctx.user;
   var job = function (j) {
@@ -1714,6 +1736,7 @@ function runBotTool_(name, a, ctx) {
         notes: 'Notes', meter_unit: 'MeterUnit', cert_expiry: 'CertExpiry' };
       var changed = [];
       Object.keys(map).forEach(function (k) { if (a[k] !== undefined && a[k] !== null) { asset[map[k]] = String(a[k]); changed.push(map[k]); } });
+      if (a.specs_add) { asset.Specs = mergeSpecs_(asset.Specs, a.specs_add); if (changed.indexOf('Specs') < 0) changed.push('Specs'); }
       if (a.use_last_photo && !(ctx.file && ctx.file.kind === 'photo')) throw userError_('Please send the machine photo first.');
       var sv = apiAssetSave_({ token: tok, asset: asset, isNew: !row });
       if (a.use_last_photo) {
@@ -1721,7 +1744,7 @@ function runBotTool_(name, a, ctx) {
         setCells_(at, find_(at.rows, 'AssetID', id), { Photo: ctx.file.id, Updated: new Date() });
         changed.push('Photo');
       }
-      return { id: sv.id, added: !row, changed: changed };
+      return { id: sv.id, added: !row, changed: changed, specs: asset.Specs || '' };
     }
     case 'remove_machine':
       return apiAssetRemove_({ token: tok, id: a.id, reason: a.reason || '' });
