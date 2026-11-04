@@ -133,7 +133,8 @@ var ROUTES = {
   templates: apiTemplates_,
   expenses: apiExpenses_,
   expenseSave: apiExpenseSave_,
-  expenseRemove: apiExpenseRemove_
+  expenseRemove: apiExpenseRemove_,
+  bridge: apiBridge_
 };
 
 /* =========================================================================
@@ -1629,6 +1630,48 @@ function botAi_(u, chatId, text, file, key) {
   if (!reply) reply = 'Done.';
   botMemory_(chatId, hist.concat([{ role: 'user', parts: [{ text: note + (text || '') }] }, { role: 'model', parts: [{ text: reply }] }]));
   return { reply: reply, actions: ctx.actions };
+}
+
+/* =========================================================================
+ * Bridge for Denuwan's TVS Command Centre (2026-11-04)
+ * His landing page's assistant uses the SAME job tools as the Telegram bot, acting as Denuwan (admin), so every
+ * change follows the normal rules, is logged in WorkOrderLog and sends the usual Telegram / email alerts.
+ * The Command Centre only calls a change after Denuwan has tapped Confirm on his page.
+ * Security: the call must carry the key from a private file in Denuwan's own Drive (BRIDGE_KEY_FILE, created by the
+ * Command Centre). This script runs as the same Google account, so it can read that file; nobody else can.
+ * ========================================================================= */
+
+var BRIDGE_KEY_FILE = 'TVS Command Centre - bridge key (private, do not share)';
+var BRIDGE_TOOLS = ['find_jobs', 'get_job', 'job_action', 'create_job'];
+
+function apiBridge_(p) {
+  bridgeCheck_(p.key);
+  if (BRIDGE_TOOLS.indexOf(p.tool) < 0) throw userError_('Not allowed: ' + p.tool);
+  var u = readTable_('Users').rows.filter(function (x) { return x.UserID && isActive_(x) && String(x.Role).toLowerCase() === 'admin'; })[0];
+  if (!u) throw userError_('No active admin user in the Users tab.');
+  TABLE_CACHE_ = {};
+  var ctx = { user: u, token: makeToken_(String(u.UserID)), file: null, actions: [] };
+  return runBotTool_(p.tool, p.args || {}, ctx);
+}
+
+/** Refuses the call unless key matches the private key file (owned by this account). 10 wrong keys = 10 min lock. */
+function bridgeCheck_(key) {
+  var cache = CacheService.getScriptCache();
+  if (Number(cache.get('bridge_fails') || 0) >= 10) throw userError_('Bridge locked for 10 minutes.');
+  var real = cache.get('bridge_key');
+  if (!real) {
+    var me = Session.getEffectiveUser().getEmail(), files = DriveApp.getFilesByName(BRIDGE_KEY_FILE);
+    while (files.hasNext() && !real) {
+      var f = files.next();
+      if (!f.isTrashed() && f.getOwner() && f.getOwner().getEmail() === me) real = f.getBlob().getDataAsString().trim();
+    }
+    if (!real) throw userError_('Bridge key file not found.');
+    cache.put('bridge_key', real, 600);
+  }
+  if (String(key || '') !== real) {
+    cache.put('bridge_fails', String(Number(cache.get('bridge_fails') || 0) + 1), 600);
+    throw userError_('Not allowed.');
+  }
 }
 
 /** Finds a user by ID or (part of the) name. */
