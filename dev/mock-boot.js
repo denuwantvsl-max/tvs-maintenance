@@ -37,6 +37,7 @@
         var at = readTable_('Assets', true);
         setCells_(at, find_(at.rows, 'AssetID', 'EN-CA-01'), { MeterUnit: 'h', CurrentMeter: 2985 });
         setCells_(at, find_(at.rows, 'AssetID', 'ST-MM-01'), { MeterUnit: 'h', CurrentMeter: 4410 });
+        seedDemoReadings();
         var ut = readTable_('Users', true);
         ut.rows.forEach(function (u) { setCells_(ut, u, { NewPIN: DEMO_DATA.pins[u.UserID] }); });
         window.FAKE_GAS.props.TELEGRAM_BOT_TOKEN = 'fake';
@@ -51,6 +52,26 @@
       }
     });
   };
+  /** 30 days of made-up meter readings so the Readings tab and insights.html have something to show (mock only). */
+  function seedDemoReadings() {
+    var seed = 7, rnd = function () { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+    var day = function (n) { return Utilities.formatDate(new Date(Date.now() + n * 86400000), TZ, 'yyyy-MM-dd'); };
+    var gen = { h: 1270.5, st: 790, fuel: 82 }, comp = { h: 7020, l: 1650, st: 93300 }, water = 5170, n = 1;
+    var add = function (o) { appendObj_('Readings', Object.assign({ ReadingID: 'RD-' + ('0000' + (n++)).slice(-4), Time: '08:' + (30 + Math.floor(rnd() * 25)), By: rnd() < .5 ? 'Gayan' : 'Hirushan', Created: new Date() }, o)); };
+    for (var d = -30; d <= -1; d++) {
+      var date = day(d), sunday = new Date(Date.now() + d * 86400000).getDay() === 0;
+      var run = (d % 7 === 0) ? 0.3 : (rnd() < .12 ? 1.5 + rnd() * 3 : 0);
+      if (run) { gen.h += run; gen.st += 1 + (run > 1 && rnd() < .3 ? 1 : 0); gen.fuel -= run * 16.5 / 440 * 100; }
+      if (gen.fuel < 26) { appendObj_('FuelLog', { RefillID: 'FL-9' + n, Date: date, AssetID: 'EN-PS-06', Litres: 200, Hours: Math.round(gen.h * 100) / 100, FuelBefore: Math.round(gen.fuel), FuelAfter: Math.round(gen.fuel + 45), By: 'Gayan', Created: new Date(Date.now() + d * 86400000) }); gen.fuel += 45; }
+      add({ Date: date, Point: 'GEN', AssetID: 'EN-PS-06', Hours: Math.round(gen.h * 100) / 100, Starts: gen.st, FuelPct: Math.round(gen.fuel) });
+      var cr = sunday ? 0 : 6.5 + rnd() * 1.5, cl = cr * (0.11 + rnd() * 0.07);
+      comp.h += cr; comp.l += cl; comp.st += sunday ? 0 : Math.round(80 + rnd() * 25);
+      add({ Date: date, Point: 'COMP', AssetID: 'EN-CA-01', Hours: Math.round(comp.h), LoadedHours: Math.round(comp.l), Starts: comp.st });
+      water += sunday ? 3 + rnd() : (d === -9 ? 12.4 : 6.6 + rnd() * 1.4);
+      add({ Date: date, Point: 'WATER', AssetID: 'EN-FM-WM-01', WaterM3: Math.round(water * 100) / 100 });
+    }
+  }
+
   window.CMMS_MOCK_POST = function (body) {
     return new Promise(function (resolve) {
       setTimeout(function () {

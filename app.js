@@ -1022,6 +1022,7 @@
     rdDue: ['Due today', 'අද කළ යුතුයි'],
     rdTake: ['Take reading', 'කියවීම ගන්න'],
     rdRefill: ['⛽ Diesel refill', '⛽ ඩීසල් පිරවීම'],
+    rdCharts: ['Charts', 'ප්‍රස්ථාර'],
     rdLast: ['Last', 'අවසන්'],
     rdNone: ['No readings yet.', 'තවම කියවීම් නැත.'],
     rdPhotos: ['Photos of the meter', 'මීටරයේ ඡායාරූප'],
@@ -1085,7 +1086,7 @@
       var tone = { bad: 'err', warn: 'info', info: 'info' };
       var h = '<h1 style="margin:4px 0 4px">' + esc(t('rdTitle')) + '</h1><p class="lead">' + esc(t('rdLead').replace('{h}', d.byHour)) + '</p>' +
         '<div class="toolbar"><b style="flex:1">' + esc(t('rdDoneOf').replace('{n}', d.doneToday).replace('{t}', d.points.length)) + '</b>' +
-        '<a class="btn sm ghost" href="#refill">' + esc(t('rdRefill')) + '</a></div>';
+        '<a class="btn sm ghost" href="insights.html">📈 ' + esc(t('rdCharts')) + '</a><a class="btn sm ghost" href="#refill">' + esc(t('rdRefill')) + '</a></div>';
       var real = d.alerts.filter(function (a) { return a.tone !== 'info'; });
       if (real.length) h += '<div class="card flat"><h3 style="margin-top:0">' + esc(t('rdAlerts')) + '</h3>' + real.map(function (a) {
         return '<div class="msg ' + tone[a.tone] + '" style="margin:8px 0"><b>' + esc(a.title) + '</b>' + (a.detail ? '<div class="small">' + esc(a.detail) + '</div>' : '') + '</div>';

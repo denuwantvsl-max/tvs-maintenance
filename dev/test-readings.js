@@ -180,4 +180,14 @@ assert.strictEqual(after[0].PhotoUntil, 'deleted'); assert.strictEqual(after[0].
 assert.strictEqual(after[1].PhotoUntil, 'keep');
 passed += 6;
 
+// ---- charts page data ----
+const cd = ok('readingsData', { token: tech.token, days: 30 });
+assert.deepStrictEqual(cd.points.map(x => x.id), ['GEN', 'COMP', 'WATER']);
+assert.strictEqual(cd.limits.tankLitres, 440);
+assert.ok(cd.points[2].rows.length === 1 && cd.points[2].rows[0].date < cd.from, 'reading before the period kept as the starting point');
+assert.ok(cd.points[0].rows.some(r => r.values.Hours === 1320) && cd.summary.points.length === 3);
+assert.ok(cd.points[2].rows.every(r => r.at), 'rows carry a timestamp');
+assert.strictEqual(ok('readingsData', { token: tech.token, days: 2 }).days, 7, 'at least 7 days');
+fails('readingsData', {}, /log in/);
+
 console.log('All readings tests passed (' + passed + ' checks).');

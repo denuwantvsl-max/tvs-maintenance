@@ -143,6 +143,7 @@ var ROUTES = {
   bridge: apiBridge_,
   readingsHome: apiReadingsHome_,
   readingsList: apiReadingsList_,
+  readingsData: apiReadingsData_,
   readingAi: apiReadingAi_,
   readingSave: apiReadingSave_,
   refillSave: apiRefillSave_
@@ -1501,6 +1502,29 @@ function apiReadingsList_(p) {
   ensureReadings_();
   var from = Date.now() - Math.min(366, Number(p.days) || 31) * 86400000;
   return { rows: readingRows_(p.point ? readingPoint_(p.point).id : '').filter(function (r) { return r.at.getTime() >= from; }).reverse().map(readingOut_) };
+}
+
+/** Everything the charts page (insights.html) needs: readings of the period (+ the one before it per point), refills,
+ *  limits from Settings, machine specs and the current summary. */
+function apiReadingsData_(p) {
+  auth_(p);
+  ensureReadings_();
+  var days = Math.max(7, Math.min(400, Number(p.days) || 30)), from = Date.now() - days * 86400000, s = settings_();
+  var amap = assetMap_(), points = READING_POINTS.map(function (pt) {
+    var rows = readingRows_(pt.id), keep = [], prev = null;
+    rows.forEach(function (r) { if (r.at.getTime() >= from) keep.push(r); else prev = r; });
+    if (prev) keep.unshift(prev);
+    var a = amap[pt.assetId] || {};
+    return { id: pt.id, name: pt.name, assetId: pt.assetId, meter: pt.meter, fields: pt.fields,
+      make: String(a.Make || ''), model: String(a.Model || ''), specs: String(a.Specs || ''),
+      rows: keep.map(function (r) { return { date: r.date, time: r.time, at: r.at.toISOString(), values: r.values, by: r.by, note: r.note }; }) };
+  });
+  var fromDay = Utilities.formatDate(new Date(from), TZ, 'yyyy-MM-dd');
+  return { days: days, from: fromDay, today: Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), points: points,
+    refills: fuelRows_().filter(function (f) { return f.date >= fromDay; }),
+    limits: { tankLitres: Number(s.GEN_TANK_LITRES) || 0, lphMin: Number(s.GEN_LPH_MIN) || 10, lphMax: Number(s.GEN_LPH_MAX) || 45,
+      fuelLowPct: Number(s.GEN_FUEL_LOW_PCT) || 25, compMinLoadPct: Number(s.COMP_MIN_LOAD_PCT) || 30, waterHighFactor: Number(s.WATER_HIGH_FACTOR) || 1.5 },
+    summary: readingsSummary_() };
 }
 
 function readingOut_(r) {
