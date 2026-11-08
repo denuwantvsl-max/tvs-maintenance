@@ -232,7 +232,8 @@
   G.DriveApp = {
     Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK' }, Permission: { VIEW: 'VIEW' },
     createFolder: function (name) { var id = 'FAKEFOLDER' + Object.keys(folders).length; folders[id] = new Folder(id, name); return folders[id]; },
-    getFolderById: function (id) { if (!folders[id]) throw new Error('No folder'); return folders[id]; }
+    getFolderById: function (id) { if (!folders[id]) throw new Error('No folder'); return folders[id]; },
+    getFileById: function (id) { return { setTrashed: function () { (FAKE.trashed = FAKE.trashed || []).push(id); } }; }
   };
   G.ScriptApp = {
     getProjectTriggers: function () { return FAKE.triggers.slice(); },

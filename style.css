@@ -167,6 +167,8 @@ input:disabled, select:disabled, textarea:disabled { background: #f8fafc; color:
 
 .photo-pick { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .photo-pick img { width: 72px; height: 72px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }
+input.rd-num { font-size: 22px; font-weight: 700; letter-spacing: .3px; font-variant-numeric: tabular-nums; }
+.rd-card .btn-row .btn { flex: 0 1 auto; }
 
 /* ---------- messages ---------- */
 .msg { border-radius: var(--radius-sm); padding: 12px 14px; margin: 12px 0; font-size: 15px; border: 1px solid transparent; }

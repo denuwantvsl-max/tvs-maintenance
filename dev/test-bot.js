@@ -201,7 +201,7 @@ passed += 30;
 assert.deepStrictEqual(F.geminiCalls[0].generationConfig.thinkingConfig, { thinkingLevel: 'low' });
 assert.strictEqual(F.geminiCalls[0].generationConfig.temperature, 0.2, 'other settings kept');
 assert.deepStrictEqual(thinkingConfig_('gemini-2.5-flash', 'low'), { thinkingBudget: 512 });
-assert.strictEqual(thinkingConfig_('gemini-3.8-flash', ''), null);
+assert.strictEqual(thinkingConfig_('gemini-3.5-flash', ''), null);
 F.geminiCalls = [];
 F.gemini = p => p.generationConfig && p.generationConfig.thinkingConfig
   ? { __code: 400, error: { message: 'Thinking level is not supported for this model.' } }
@@ -234,12 +234,12 @@ UrlFetchApp.fetch = function (url, o) {
 F.gemini = () => (models[models.length - 1] === 'backup-model' ? answer('From backup.') : busy);
 script = [];
 assert.strictEqual(say(111, 'forklifts?'), 'From backup.');
-assert.deepStrictEqual(models, ['gemini-3.8-flash', 'gemini-3.8-flash', 'gemini-3.8-flash', 'backup-model']);
+assert.deepStrictEqual(models, ['gemini-3.5-flash', 'gemini-3.5-flash', 'gemini-3.5-flash', 'backup-model']);
 // limit used up on the main model → straight to the backup
 models.length = 0;
 F.gemini = () => (models[models.length - 1] === 'backup-model' ? answer('Backup again.') : { __code: 429, error: { message: 'quota' } });
 assert.strictEqual(say(111, 'hi'), 'Backup again.');
-assert.deepStrictEqual(models, ['gemini-3.8-flash', 'backup-model']);
+assert.deepStrictEqual(models, ['gemini-3.5-flash', 'backup-model']);
 // tool rounds stay on the backup model once it was used
 models.length = 0;
 let first = true;

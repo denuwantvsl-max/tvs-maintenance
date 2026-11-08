@@ -243,7 +243,8 @@
   function showTab(name) {
     document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-tab') === name); });
     if (name === 'labels') document.querySelector('#tabs [data-tab="assets"]').classList.add('on');
-    ['jobs', 'pm', 'assets', 'dash', 'labels', 'me'].forEach(function (n) { $('tab-' + n).classList.toggle('hidden', n !== name); });
+    ['jobs', 'pm', 'readings', 'assets', 'dash', 'labels', 'me'].forEach(function (n) { $('tab-' + n).classList.toggle('hidden', n !== name); });
+    if (name === 'readings') loadReadings();
     if (name === 'pm') { renderPmViews(); loadPm(); }
     if (name === 'assets') loadAssets().then(renderAssets);
     if (name === 'dash') loadDash();
@@ -302,10 +303,15 @@
     if (!$('tab-jobs').classList.contains('hidden')) loadJobs();
     if (!$('tab-assets').classList.contains('hidden')) { S.assets = null; loadAssets().then(renderAssets); }
     if (!$('tab-pm').classList.contains('hidden')) loadPm();
+    if (!$('tab-readings').classList.contains('hidden')) loadReadings();
     if (!$('tab-dash').classList.contains('hidden') && S.dashView === 'cost') loadCosts();
   });
   function route() {
     var h = location.hash.replace(/^#/, '');
+    if (h === 'readings') { history.replaceState(null, '', location.pathname + location.search); closeSheet(); showTab('readings'); return; }
+    var rd = /^reading=(.+)$/.exec(h);
+    if (rd) { showTab('readings'); openReading(decodeURIComponent(rd[1]).toUpperCase()); return; }
+    if (h === 'refill') { showTab('readings'); openRefill(); return; }
     var m = /^wo=(.+)$/.exec(h), a = /^asset=(.*)$/.exec(h), pm = /^pm=(.*)$/.exec(h), rec = /^rec=(.+)$/.exec(h), pe = /^pmedit=(.*)$/.exec(h), bl = /^bill=(.*)$/.exec(h);
     if (m) openJob(decodeURIComponent(m[1]));
     else if (a) openAsset(decodeURIComponent(a[1]));
@@ -1004,6 +1010,213 @@
       setTimeout(function () { window.print(); }, 400);
     }).catch(function (e) { alert(e.message); });
   });
+
+  /* ---------------- daily readings (generator, compressor, water) ---------------- */
+  C.addDict({
+    tabReadings: ['Readings', 'කියවීම්'],
+    rdTitle: ['Daily readings', 'දෛනික කියවීම්'],
+    rdLead: ['Every morning by {h}:00: take a photo of each meter. The AI reads the numbers; check them and save. Only the numbers are kept – photos are deleted after 30 days.',
+      'සෑම උදෑසනකම {h}:00 ට පෙර: සෑම මීටරයකම ඡායාරූපයක් ගන්න. AI අංක කියවයි; ඒවා පරීක්ෂා කර සුරකින්න. අංක පමණක් තබා ගනී – ඡායාරූප දින 30 කින් මැකේ.'],
+    rdDoneOf: ['{n} of {t} done today', 'අද {t} න් {n} ක් අවසන්'],
+    rdDone: ['✓ Done today', '✓ අද අවසන්'],
+    rdDue: ['Due today', 'අද කළ යුතුයි'],
+    rdTake: ['Take reading', 'කියවීම ගන්න'],
+    rdRefill: ['⛽ Diesel refill', '⛽ ඩීසල් පිරවීම'],
+    rdLast: ['Last', 'අවසන්'],
+    rdNone: ['No readings yet.', 'තවම කියවීම් නැත.'],
+    rdPhotos: ['Photos of the meter', 'මීටරයේ ඡායාරූප'],
+    rdPhotoHint: ['One photo per screen. Generator: the "Engine Run Time" screen and the "Engine Fuel Level" screen.', 'තිරයකට එක් ඡායාරූපයක්. ජනකය: "Engine Run Time" තිරය සහ "Engine Fuel Level" තිරය.'],
+    rdTakePhoto: ['📷 Take photo', '📷 ඡායාරූපය ගන්න'],
+    rdReading: ['Reading the meter…', 'මීටරය කියවමින්…'],
+    rdAiRead: ['AI read', 'AI කියවූයේ'],
+    rdAiUnsure: ['Not sure – check every digit.', 'විශ්වාස නැත – සෑම ඉලක්කමක්ම පරීක්ෂා කරන්න.'],
+    rdAiCheck: ['Check it matches the meter.', 'මීටරයට ගැළපේදැයි බලන්න.'],
+    rdAiNothing: ['Could not read this photo. Type the numbers, or take a clearer photo.', 'මෙම ඡායාරූපය කියවිය නොහැක. අංක ටයිප් කරන්න, නැතහොත් පැහැදිලි ඡායාරූපයක් ගන්න.'],
+    rdHmHint: ['You can type 1286h 45m – it becomes 1286.75', '1286h 45m ලෙස ටයිප් කළ හැක – එය 1286.75 වේ'],
+    rdLower: ['Lower than the last reading ({v}). Check it; if it is right, write why in the note.', 'අවසන් කියවීමට ({v}) වඩා අඩුයි. පරීක්ෂා කරන්න; නිවැරදි නම් හේතුව සටහනේ ලියන්න.'],
+    rdSaved: ['Saved: {what}', 'සුරකින ලදී: {what}'],
+    rdSince: ['since last', 'අවසන් වරින් පසු'],
+    rdHistory: ['Recent readings', 'මෑත කියවීම්'],
+    rdRefillTitle: ['Generator diesel refill', 'ජනක ඩීසල් පිරවීම'],
+    rdLitres: ['Litres filled', 'පිරවූ ලීටර්'],
+    rdHoursAt: ['Generator hour meter at the refill', 'පිරවූ විට ජනක පැය මීටරය'],
+    rdBefore: ['Fuel level before (%)', 'පෙර ඉන්ධන මට්ටම (%)'],
+    rdAfter: ['Fuel level after (%)', 'පසු ඉන්ධන මට්ටම (%)'],
+    rdRefills: ['Recent refills', 'මෑත පිරවීම්'],
+    rdAlerts: ['Needs attention', 'අවධානය අවශ්‍යයි'],
+    f_Hours: ['Running hours', 'ක්‍රියාත්මක පැය'],
+    f_LoadedHours: ['Loaded hours', 'බර සහිත පැය'],
+    f_Starts: ['Starts', 'ආරම්භ ගණන'],
+    f_FuelPct: ['Fuel level (%)', 'ඉන්ධන මට්ටම (%)'],
+    f_WaterM3: ['Water meter (m³)', 'ජල මීටරය (m³)']
+  });
+  C.applyI18n();
+  document.addEventListener('langchange', function () { if (S.user && !$('tab-readings').classList.contains('hidden')) loadReadings(); });
+  var RD_UNIT = { Hours: 'h', LoadedHours: 'h', Starts: '', FuelPct: '%', WaterM3: 'm³' };
+
+  function fmtNum(v, dec) { return Number(v).toLocaleString('en-US', { maximumFractionDigits: dec === undefined ? 2 : dec }); }
+  function fmtVals(vals) {
+    return Object.keys(vals || {}).map(function (f) { return t('f_' + f).replace(/ \(.*\)$/, '') + ' ' + fmtNum(vals[f]) + (RD_UNIT[f] ? ' ' + RD_UNIT[f] : ''); }).join(' · ');
+  }
+  function rdStats(p) {
+    var s = p.stats || {}, out = [];
+    if (p.id === 'GEN') {
+      if (s.fuelPct !== undefined) out.push('⛽ ' + s.fuelPct + '%' + (s.fuelLitres !== undefined ? ' ≈ ' + s.fuelLitres + ' L' : ''));
+      if (s.lph !== undefined) out.push(s.lph + ' L/h'); else if (s.lphRefills !== undefined) out.push(s.lphRefills + ' L/h (old records)');
+      if (s.monthHours !== undefined) out.push(fmtNum(s.monthHours, 1) + ' h this month');
+    }
+    if (p.id === 'COMP') {
+      if (s.loadPct !== undefined) out.push('Loaded ' + s.loadPct + '% (' + s.windowDays + ' d)');
+      if (s.runPerDay !== undefined) out.push(s.runPerDay + ' h/day');
+      if (s.startsPerDay !== undefined) out.push(s.startsPerDay + ' starts/day');
+    }
+    if (p.id === 'WATER') {
+      if (s.lastPerDay !== undefined) out.push(s.lastPerDay + ' m³/day');
+      if (s.avgPerDay !== undefined) out.push('usual ' + s.avgPerDay);
+      if (s.monthM3 !== undefined) out.push(fmtNum(s.monthM3, 1) + ' m³ this month');
+    }
+    return out.join(' · ');
+  }
+  function loadReadings() {
+    var box = $('tab-readings');
+    box.innerHTML = C.loadingHtml();
+    return C.api('readingsHome').then(function (d) {
+      S.rd = d;
+      var tone = { bad: 'err', warn: 'info', info: 'info' };
+      var h = '<h1 style="margin:4px 0 4px">' + esc(t('rdTitle')) + '</h1><p class="lead">' + esc(t('rdLead').replace('{h}', d.byHour)) + '</p>' +
+        '<div class="toolbar"><b style="flex:1">' + esc(t('rdDoneOf').replace('{n}', d.doneToday).replace('{t}', d.points.length)) + '</b>' +
+        '<a class="btn sm ghost" href="#refill">' + esc(t('rdRefill')) + '</a></div>';
+      var real = d.alerts.filter(function (a) { return a.tone !== 'info'; });
+      if (real.length) h += '<div class="card flat"><h3 style="margin-top:0">' + esc(t('rdAlerts')) + '</h3>' + real.map(function (a) {
+        return '<div class="msg ' + tone[a.tone] + '" style="margin:8px 0"><b>' + esc(a.title) + '</b>' + (a.detail ? '<div class="small">' + esc(a.detail) + '</div>' : '') + '</div>';
+      }).join('') + '</div>';
+      h += '<div class="list">' + d.points.map(function (p) {
+        var l = p.last;
+        return '<div class="item rd-card"><div class="top"><span class="id">' + esc(p.name) + '</span>' +
+          '<span class="pill ' + (p.doneToday ? 'st-CLOSED' : 'st-NEW') + '">' + esc(t(p.doneToday ? 'rdDone' : 'rdDue')) + '</span></div>' +
+          '<div class="meta">' + esc(p.assetId) + '</div>' +
+          (l ? '<div class="ttl">' + esc(fmtVals(l.values)) + '</div><div class="meta">' + esc(t('rdLast')) + ': ' + esc(l.date + (l.time ? ' ' + l.time : '')) + (l.by ? ' · ' + esc(l.by) : '') + '</div>'
+            : '<div class="meta">' + esc(t('rdNone')) + '</div>') +
+          (rdStats(p) ? '<div class="meta" style="color:var(--ink-2)">' + esc(rdStats(p)) + '</div>' : '') +
+          '<div class="btn-row" style="margin-top:10px"><a class="btn' + (p.doneToday ? ' ghost' : '') + '" href="#reading=' + p.id + '">' + esc(t('rdTake')) + '</a></div></div>';
+      }).join('') + '</div>';
+      if (d.refills && d.refills.length) h += '<div class="card"><h3 style="margin-top:0">' + esc(t('rdRefills')) + '</h3><table class="simple">' + d.refills.map(function (f) {
+        return '<tr><td>' + esc(f.date) + '</td><td>' + esc(f.hours !== null ? fmtNum(f.hours) + ' h' : '') + (f.exclude ? ' (not counted)' : '') + '</td><td class="num">' + fmtNum(f.litres, 1) + ' L</td></tr>';
+      }).join('') + '</table></div>';
+      box.innerHTML = h;
+    }).catch(function (e) { handleErr(e); box.innerHTML = '<div class="msg err">' + esc(e.message) + '</div>'; });
+  }
+
+  /** "1286h 45m", "1286 h 45", "1286:45" -> 1286.75; plain numbers stay. */
+  function parseHours(v) {
+    var s = String(v || '').trim().replace(/,/g, '');
+    var m = /^(\d+)\s*(?:h|hrs?|:)\s*(\d{1,2})\s*m?$/i.exec(s) || /^(\d+)\s*h\s+(\d{1,2})$/i.exec(s);
+    if (m) return Math.round((Number(m[1]) + Number(m[2]) / 60) * 100) / 100;
+    s = s.replace(/\s*(h|hrs?|hours?)$/i, '');
+    return s === '' ? '' : Number(s);
+  }
+
+  function openReading(id) {
+    var go = function () {
+      var p = (S.rd.points || []).filter(function (x) { return x.id === id; })[0];
+      if (!p) { closeSheet(); return; }
+      var st = { photos: [], ai: {} };
+      var hint = { GEN: t('rdPhotoHint'), COMP: '', WATER: '' }[p.id];
+      var h = '<div class="card"><div class="muted">' + esc(p.assetId) + (p.last ? ' · ' + esc(t('rdLast')) + ': ' + esc(fmtVals(p.last.values)) + ' (' + esc(p.last.date) + ')' : '') + '</div>' +
+        '<label class="f">' + esc(t('rdPhotos')) + '</label>' + (hint ? '<div class="hint" style="margin:-2px 0 8px">' + esc(hint) + '</div>' : '') +
+        '<div class="photo-pick" id="rdThumbs"><label class="btn ghost sm" for="rdPhoto">' + esc(t('rdTakePhoto')) + '</label>' +
+        '<input type="file" id="rdPhoto" accept="image/*" capture="environment" class="hidden"></div><div id="rdAi"></div>' +
+        p.fields.map(function (f) {
+          var hm = f === 'Hours' || f === 'LoadedHours';
+          return field('rd_' + f, t('f_' + f) + (f === p.meter ? ' *' : ''), '<input type="text" id="rd_' + f + '" inputmode="decimal" autocomplete="off" class="rd-num">') +
+            (hm && p.id === 'GEN' ? '<div class="hint">' + esc(t('rdHmHint')) + '</div>' : '') + '<div id="rdw_' + f + '"></div>';
+        }).join('') +
+        field('rd_note', t('note') + ' ' + t('optional'), '<textarea id="rd_note" maxlength="500" style="min-height:64px"></textarea>') +
+        '<div id="rdErr" class="hidden"></div><div class="btn-row"><button class="btn dark" id="rdSave" type="button">' + esc(t('save')) + '</button></div></div>';
+      var rec = p.recent || [];
+      if (rec.length) h += '<div class="card"><h3 style="margin-top:0">' + esc(t('rdHistory')) + '</h3><table class="simple">' + rec.map(function (r) {
+        return '<tr><td>' + esc(r.date + (r.time ? ' ' + r.time : '')) + '</td><td>' + esc(fmtVals(r.values)) + (r.corrected === 'Yes' ? ' ✎' : '') +
+          (r.note ? '<div class="small muted">' + esc(r.note) + '</div>' : '') + '</td><td>' + r.photos.map(function (u, i) { return '<a href="' + esc(u) + '" target="_blank" rel="noopener">📷' + (r.photos.length > 1 ? i + 1 : '') + '</a>'; }).join(' ') + '</td></tr>';
+      }).join('') + '</table></div>';
+      openSheet(p.name, h);
+
+      var check = function () {
+        p.fields.forEach(function (f) {
+          var box = $('rdw_' + f), raw = $('rd_' + f).value, v = (f === 'Hours' || f === 'LoadedHours') ? parseHours(raw) : (raw.trim() === '' ? '' : Number(raw));
+          var was = p.last && p.last.values[f];
+          box.innerHTML = (v !== '' && isFinite(v) && was !== undefined && f !== 'FuelPct' && v < was) ? '<div class="msg err" style="margin:6px 0">' + esc(t('rdLower').replace('{v}', fmtNum(was))) + '</div>' : '';
+        });
+      };
+      p.fields.forEach(function (f) { $('rd_' + f).addEventListener('input', check); });
+      $('rdPhoto').addEventListener('change', function () {
+        var file = $('rdPhoto').files[0]; $('rdPhoto').value = '';
+        if (!file || st.photos.length >= 4) return;
+        C.shrinkPhoto(file, 1600).then(function (dataUrl) {
+          st.photos.push(dataUrl);
+          $('rdThumbs').insertAdjacentHTML('beforeend', '<img src="' + dataUrl + '" alt="">');
+          var aiBox = $('rdAi');
+          aiBox.innerHTML = '<div class="msg info"><span class="spinner" style="display:inline-block;width:14px;height:14px;vertical-align:-2px;margin-right:6px"></span>' + esc(t('rdReading')) + '</div>';
+          return C.api('readingAi', { point: p.id, photo: dataUrl }).then(function (r) {
+            var keys = Object.keys(r.values);
+            if (!keys.length) { aiBox.innerHTML = '<div class="msg err">' + esc(t('rdAiNothing')) + (r.seen ? ' (' + esc(r.seen) + ')' : '') + '</div>'; return; }
+            keys.forEach(function (f) { st.ai[f] = r.values[f]; if ($('rd_' + f)) $('rd_' + f).value = r.values[f]; });
+            aiBox.innerHTML = '<div class="msg ' + (r.confidence === 'high' ? 'ok' : 'err') + '">' + esc(t('rdAiRead')) + ': <b>' + esc(fmtVals(r.values)) + '</b>. ' +
+              esc(t(r.confidence === 'high' ? 'rdAiCheck' : 'rdAiUnsure')) + '</div>';
+            check();
+          }).catch(function (e) { if (e.auth) return handleErr(e); aiBox.innerHTML = '<div class="msg err">' + esc(e.message) + '</div>'; });
+        }).catch(function (e) { $('rdAi').innerHTML = '<div class="msg err">' + esc(e.message) + '</div>'; });
+      });
+      $('rdSave').addEventListener('click', function () {
+        var values = {};
+        p.fields.forEach(function (f) {
+          var raw = $('rd_' + f).value;
+          values[f] = (f === 'Hours' || f === 'LoadedHours') ? parseHours(raw) : raw.trim();
+        });
+        $('rdSave').disabled = true;
+        C.api('readingSave', { point: p.id, values: values, ai: st.ai, photos: st.photos, note: $('rd_note').value.trim() }).then(function (r) {
+          var since = r.since && r.since[p.meter] !== undefined ? ' (+' + fmtNum(r.since[p.meter]) + ' ' + RD_UNIT[p.meter] + ' ' + t('rdSince') + ')' : '';
+          if (location.hash) history.pushState(null, '', location.pathname + location.search);
+          closeSheet(); showTab('readings');
+          loadReadings().then(function () {
+            $('tab-readings').insertAdjacentHTML('afterbegin', '<div class="msg ok">' + esc(t('rdSaved').replace('{what}', p.name + ': ' + fmtVals(r.values))) + esc(since) + '</div>');
+          });
+        }).catch(function (e) { handleErr(e, $('rdErr')); $('rdSave').disabled = false; });
+      });
+    };
+    if (S.rd) go(); else { openSheet(t('rdTitle'), C.loadingHtml()); C.api('readingsHome').then(function (d) { S.rd = d; go(); }).catch(function (e) { handleErr(e); }); }
+  }
+
+  function openRefill() {
+    var today = C.toLocalInput(new Date().toISOString(), true);
+    var gen = S.rd && S.rd.points.filter(function (x) { return x.id === 'GEN'; })[0];
+    var photo = '';
+    openSheet(t('rdRefillTitle'), '<div class="card">' +
+      '<div class="grid2"><div>' + field('rf_date', t('pmDoneAt') + ' *', '<input type="date" id="rf_date" value="' + esc(today) + '" max="' + esc(today) + '">') + '</div><div>' +
+      field('rf_l', t('rdLitres') + ' *', '<input type="text" inputmode="decimal" id="rf_l" autocomplete="off">') + '</div></div>' +
+      field('rf_h', t('rdHoursAt') + ' *', '<input type="text" inputmode="decimal" id="rf_h" autocomplete="off" value="' + esc(gen && gen.last ? gen.last.values.Hours : '') + '">') +
+      '<div class="hint">' + esc(t('rdHmHint')) + '</div>' +
+      '<div class="grid2"><div>' + field('rf_b', t('rdBefore'), '<input type="text" inputmode="numeric" id="rf_b">') + '</div><div>' +
+      field('rf_a', t('rdAfter'), '<input type="text" inputmode="numeric" id="rf_a">') + '</div></div>' +
+      '<label class="f">' + esc(t('addPhoto')) + ' <span class="opt">' + esc(t('optional')) + '</span></label><div class="photo-pick">' +
+      '<label class="btn ghost sm" for="rf_photo">' + esc(t('rdTakePhoto')) + '</label><input type="file" id="rf_photo" accept="image/*" capture="environment" class="hidden"><img id="rf_prev" class="hidden" alt=""></div>' +
+      field('rf_note', t('note') + ' ' + t('optional'), '<textarea id="rf_note" maxlength="500" style="min-height:64px"></textarea>') +
+      '<div id="rfErr" class="hidden"></div><div class="btn-row"><button class="btn dark" id="rfSave" type="button">' + esc(t('save')) + '</button></div></div>');
+    $('rf_photo').addEventListener('change', function () {
+      var f = $('rf_photo').files[0]; if (!f) return;
+      C.shrinkPhoto(f, 1600).then(function (d) { photo = d; $('rf_prev').src = d; $('rf_prev').classList.remove('hidden'); });
+    });
+    $('rfSave').addEventListener('click', function () {
+      $('rfSave').disabled = true;
+      C.api('refillSave', { refill: { date: $('rf_date').value, litres: $('rf_l').value.trim(), hours: parseHours($('rf_h').value), fuelBefore: $('rf_b').value.trim(),
+        fuelAfter: $('rf_a').value.trim(), photo: photo, note: $('rf_note').value.trim() } }).then(function (r) {
+        if (location.hash) history.pushState(null, '', location.pathname + location.search);
+        closeSheet(); showTab('readings');
+        loadReadings().then(function () {
+          $('tab-readings').insertAdjacentHTML('afterbegin', '<div class="msg ok">' + esc(t('rdSaved').replace('{what}', fmtNum(r.litres, 1) + ' L · ' + r.date)) + '</div>');
+        });
+      }).catch(function (e) { handleErr(e, $('rfErr')); $('rfSave').disabled = false; });
+    });
+  }
 
   /* ---------------- me / telegram ---------------- */
   function renderMe() {

@@ -3,6 +3,7 @@
  * Google Apps Script web app (standalone project) that stores its data in the Google Sheet "TVS Horana CMMS DB".
  * Phase 1: asset register, public QR asset pages, work orders, Telegram + email alerts.
  * Phase 2: preventive maintenance, digital checklists. Phase 2b: bills / costs, Telegram chat assistant (Gemini).
+ * Phase 2c: daily readings (generator, compressor, water meter) read from a photo by the AI, diesel refills.
  *
  * Secrets live ONLY in Script Properties (Project Settings > Script Properties):
  *   TELEGRAM_BOT_TOKEN  – from @BotFather (set by Denuwan)
@@ -38,6 +39,9 @@ var TABLES = {
   Expenses: ['ExpenseID', 'BillDate', 'Type', 'Amount', 'Supplier', 'BillNo', 'Description', 'AssetID', 'WO_ID', 'Project',
     'BillFile', 'EnteredBy', 'Source', 'Created', 'Updated', 'Active'],
   BotLog: ['Timestamp', 'User', 'Message', 'Reply', 'Actions'],
+  Readings: ['ReadingID', 'Date', 'Time', 'Point', 'AssetID', 'Hours', 'LoadedHours', 'Starts', 'FuelPct', 'WaterM3', 'AIRead', 'Corrected',
+    'Photos', 'PhotoUntil', 'By', 'Note', 'Created'],
+  FuelLog: ['RefillID', 'Date', 'AssetID', 'Litres', 'Hours', 'FuelBefore', 'FuelAfter', 'Photos', 'PhotoUntil', 'By', 'Note', 'Exclude', 'Created'],
   Settings: ['Key', 'Value', 'Description'],
   Errors: ['Timestamp', 'Action', 'Message', 'Stack']
 };
@@ -50,7 +54,9 @@ var TEXT_COLUMNS = {
   ChecklistItems: ['TemplateID', 'ItemNo'],
   PMTasks: ['TaskID', 'AssetID', 'TemplateID', 'AssignedTo'],
   PMRecords: ['RecordID', 'TaskID', 'AssetID', 'TemplateID', 'WO_ID'],
-  Expenses: ['ExpenseID', 'BillNo', 'AssetID', 'WO_ID']
+  Expenses: ['ExpenseID', 'BillNo', 'AssetID', 'WO_ID'],
+  Readings: ['ReadingID', 'Date', 'Time', 'Point', 'AssetID', 'PhotoUntil'],
+  FuelLog: ['RefillID', 'Date', 'AssetID', 'PhotoUntil']
 };
 
 var DEFAULT_SETTINGS = [
@@ -68,7 +74,7 @@ var DEFAULT_SETTINGS = [
   ['CERT_ALERT_DAYS', '60,30,7,1', 'Telegram alert this many days before an inspection certificate expires'],
   ['PM_SOON_DAYS', '7', 'PM tasks due within this many days show as "coming up"'],
   ['EXPENSE_TYPES', 'Repair,PM / Service,Spare parts,Tool purchase,Contractor,Project,Consumables,Other', 'Bill / cost types (comma separated)'],
-  ['AI_MODEL', 'gemini-3.8-flash', 'Gemini model used by the Telegram assistant (run checkAi to list the ones your key can use)'],
+  ['AI_MODEL', 'gemini-3.5-flash', 'Gemini model used by the Telegram assistant (run checkAi to list the ones your key can use)'],
   ['AI_MODEL_BACKUP', '', 'Second Gemini model, used when the main one is busy or its free limit is used up (blank = none)'],
   ['AI_THINKING', 'low', 'How long the assistant thinks before it answers: minimal, low (fast), medium or high (slow); blank = model default']
 ];
@@ -134,7 +140,12 @@ var ROUTES = {
   expenses: apiExpenses_,
   expenseSave: apiExpenseSave_,
   expenseRemove: apiExpenseRemove_,
-  bridge: apiBridge_
+  bridge: apiBridge_,
+  readingsHome: apiReadingsHome_,
+  readingsList: apiReadingsList_,
+  readingAi: apiReadingAi_,
+  readingSave: apiReadingSave_,
+  refillSave: apiRefillSave_
 };
 
 /* =========================================================================
@@ -1242,6 +1253,430 @@ function apiUsers_(p) {
 }
 
 /* =========================================================================
+ * Daily readings (Phase 2c): generator, compressor and water meter, read once a day from a photo.
+ * The AI reads the numbers, the technician checks them, and only the NUMBERS are kept for good; the photos are
+ * deleted after PHOTO_KEEP_DAYS (kept for good when a number was corrected or a note explains something odd).
+ * Tabs: Readings (one row per point per reading), FuelLog (diesel refills). Made on first use (ensureReadings_).
+ * Saving a reading also updates the machine hour meter (Assets!CurrentMeter), so hour-based PM falls due by itself.
+ * ========================================================================= */
+
+var READING_POINTS = [
+  { id: 'GEN', assetId: 'EN-PS-06', name: 'Diesel generator 250 kVA', meter: 'Hours', fields: ['Hours', 'Starts', 'FuelPct'],
+    screen: 'a Deep Sea DSE 6120 generator controller. The "Engine Run Time" screen shows hours and minutes (e.g. "1286h 45m") and "813 Start(s)"; ' +
+      'the "Engine Fuel Level" screen shows the diesel tank level in % (e.g. "64 %").' },
+  { id: 'COMP', assetId: 'EN-CA-01', name: 'Air compressor (screw)', meter: 'Hours', fields: ['Hours', 'LoadedHours', 'Starts'],
+    screen: 'an Atlas Copco Elektronikon compressor controller, "Counters" screen: "Running Hours" (e.g. 7242 hours), "Loaded Hours" (e.g. 1688 hours) and "Motor Starts" (e.g. 96422).' },
+  { id: 'WATER', assetId: 'EN-FM-WM-01', name: 'Water meter – main tank outlet', meter: 'WaterM3', fields: ['WaterM3'],
+    screen: 'a mechanical water meter (m³). The black drum digits are whole cubic metres (e.g. 05398 = 5398). The small red dials marked x0.1 and x0.01 ' +
+      'add decimals (pointer on 4 in the x0.1 dial and 6 in the x0.01 dial = .46). Ignore the x0.001 and x0.0001 dials.' }
+];
+var READING_FIELDS = {
+  Hours: { label: 'Running hours', unit: 'h', dec: 2, rising: true },
+  LoadedHours: { label: 'Loaded hours', unit: 'h', dec: 2, rising: true },
+  Starts: { label: 'Starts', unit: '', dec: 0, rising: true },
+  FuelPct: { label: 'Fuel level', unit: '%', dec: 0, min: 0, max: 100 },
+  WaterM3: { label: 'Water meter', unit: 'm³', dec: 2, rising: true }
+};
+var READING_SETTINGS = [
+  ['READING_BY_HOUR', '10', 'Daily readings (generator, compressor, water) must be in by this hour; then a Telegram reminder goes out'],
+  ['PHOTO_KEEP_DAYS', '30', 'Meter photos are deleted after this many days (numbers are kept). Photos of corrected or noted readings are kept'],
+  ['GEN_TANK_LITRES', '440', 'Generator diesel tank size in litres (turns the fuel % into litres)'],
+  ['GEN_FUEL_LOW_PCT', '25', 'Alert when the generator fuel level is below this %'],
+  ['GEN_LPH_MIN', '10', 'Generator diesel use: normal range, lowest litres per running hour'],
+  ['GEN_LPH_MAX', '45', 'Generator diesel use: normal range, highest litres per running hour'],
+  ['COMP_MIN_LOAD_PCT', '30', 'Alert when the compressor is loaded less than this % of its running time (last 7 days)'],
+  ['WATER_HIGH_FACTOR', '1.5', 'Alert when a day\'s water use is more than this many times the usual daily use']
+];
+
+/** Creates the Readings / FuelLog tabs, settings rows, the water-meter machine and the known generator history (once). */
+function ensureReadings_() {
+  var ss = db_(), props = PropertiesService.getScriptProperties();
+  if (props.getProperty('READINGS_READY') && ss.getSheetByName('Readings') && ss.getSheetByName('FuelLog')) return;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    ['Readings', 'FuelLog'].forEach(function (name) {
+      if (ss.getSheetByName(name)) return;
+      var sh = ss.insertSheet(name), want = TABLES[name];
+      sh.getRange(1, 1, 1, want.length).setValues([want]).setFontWeight('bold').setBackground('#1c2126').setFontColor('#f2b705');
+      sh.setFrozenRows(1);
+      (TEXT_COLUMNS[name] || []).forEach(function (h) { sh.getRange(2, want.indexOf(h) + 1, Math.max(sh.getMaxRows() - 1, 1), 1).setNumberFormat('@'); });
+      delete TABLE_CACHE_[name];
+    });
+    var st = readTable_('Settings', true);
+    READING_SETTINGS.forEach(function (row) {
+      if (!find_(st.rows, 'Key', row[0])) appendObj_('Settings', { Key: row[0], Value: row[1], Description: row[2] });
+    });
+    var at = readTable_('Assets', true), now = new Date();
+    if (!find_(at.rows, 'AssetID', 'EN-FM-WM-01')) {
+      appendObj_('Assets', { AssetID: 'EN-FM-WM-01', Name: 'Water meter – main tank outlet', Area: 'Facility', Location: 'Main water tank',
+        Category: 'Water meter', Make: '', Model: 'ISO 4064, Qp 3.5 m³/h', Criticality: 'C', Status: 'Active', MaintainedBy: 'TVSL',
+        Notes: 'Daily reading in the Readings tab (line out of the main tank).', MeterUnit: 'm³', Created: now, Updated: now });
+    }
+    at = readTable_('Assets', true);
+    ['EN-PS-06', 'EN-CA-01'].forEach(function (id) { var a = find_(at.rows, 'AssetID', id); if (a && !a.MeterUnit) setCells_(at, a, { MeterUnit: 'h' }); });
+    if (!readTable_('Readings', true).rows.some(function (r) { return r.ReadingID; })) {
+      appendObj_('Readings', { ReadingID: 'RD-0001', Date: '2026-11-03', Time: '', Point: 'GEN', AssetID: 'EN-PS-06', Hours: 1282.42, Starts: 810,
+        PhotoUntil: '', By: 'Denuwan Chamara', Note: 'Starting reading from the controller (1282 h 25 m). Services: 4 Dec 2025 at 1215 h, 18 Aug 2026 at 1265 h.', Created: now });
+    }
+    if (!readTable_('FuelLog', true).rows.some(function (r) { return r.RefillID; })) {
+      [['FL-0001', '2025-12-04', 0, 1215, 'Baseline: tank taken as full at the Dec 2025 service', ''],
+        ['FL-0002', '2026-03-05', 160, '', 'Water mix in this diesel – not counted', 'Yes'],
+        ['FL-0003', '2026-11-03', 1075, 1282.42, 'Total diesel fed 4 Dec 2025 – 3 Nov 2026 (old records, water mix not counted)', '']
+      ].forEach(function (f) {
+        appendObj_('FuelLog', { RefillID: f[0], Date: f[1], AssetID: 'EN-PS-06', Litres: f[2], Hours: f[3], By: 'Denuwan Chamara', Note: f[4], Exclude: f[5], Created: now });
+      });
+    }
+    props.setProperty('READINGS_READY', '1');
+  } finally { lock.releaseLock(); }
+}
+
+function readingPoint_(id) {
+  var pt = READING_POINTS.filter(function (x) { return x.id === String(id || '').toUpperCase(); })[0];
+  if (!pt) throw userError_('Unknown reading point: ' + id);
+  return pt;
+}
+
+function roundTo_(n, dec) { var f = Math.pow(10, dec); return Math.round(n * f) / f; }
+
+/** Readings of one point as plain objects, oldest first. */
+function readingRows_(pointId) {
+  return readTable_('Readings').rows.filter(function (r) { return r.ReadingID && (!pointId || r.Point === pointId); }).map(function (r) {
+    var v = {};
+    Object.keys(READING_FIELDS).forEach(function (k) { if (r[k] !== '' && r[k] !== undefined && isFinite(Number(r[k]))) v[k] = Number(r[k]); });
+    var date = r.Date instanceof Date ? Utilities.formatDate(r.Date, TZ, 'yyyy-MM-dd') : String(r.Date || '').slice(0, 10);
+    var time = r.Time instanceof Date ? Utilities.formatDate(r.Time, TZ, 'HH:mm') : String(r.Time || '').slice(0, 5);
+    return { id: String(r.ReadingID), point: r.Point, date: date, time: time, at: parseLocal_(date + (time ? 'T' + time : 'T00:00')),
+      values: v, by: String(r.By || ''), note: String(r.Note || ''), corrected: String(r.Corrected || ''), aiRead: String(r.AIRead || ''),
+      photos: list_(r.Photos), photoUntil: String(r.PhotoUntil || '') };
+  }).filter(function (r) { return r.at; }).sort(function (a, b) { return a.at - b.at || a.id.localeCompare(b.id); });
+}
+
+function fuelRows_() {
+  return readTable_('FuelLog').rows.filter(function (r) { return r.RefillID; }).map(function (r) {
+    var date = r.Date instanceof Date ? Utilities.formatDate(r.Date, TZ, 'yyyy-MM-dd') : String(r.Date || '').slice(0, 10);
+    return { id: String(r.RefillID), date: date, litres: Number(r.Litres) || 0, hours: r.Hours === '' ? null : Number(r.Hours),
+      before: r.FuelBefore === '' ? null : Number(r.FuelBefore), after: r.FuelAfter === '' ? null : Number(r.FuelAfter),
+      by: String(r.By || ''), note: String(r.Note || ''), exclude: yes_(r.Exclude), created: dateNum_(r.Created) };
+  }).sort(function (a, b) { return a.date.localeCompare(b.date) || a.id.localeCompare(b.id); });
+}
+
+/* ---------------------------------------------------------------- AI reading of a photo */
+
+function apiReadingAi_(p) {
+  auth_(p, TEAM_ROLES);
+  var pt = readingPoint_(p.point);
+  var m = /^data:image\/(jpeg|png|webp);base64,(.+)$/.exec(String(p.photo || ''));
+  if (!m) throw userError_('Photo format not supported');
+  var key = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!key) throw userError_('The AI reader is not switched on. Type the numbers from the meter.');
+  var s = settings_();
+  var want = pt.fields.map(function (f) { return '"' + f + '": number or null (' + READING_FIELDS[f].label + (READING_FIELDS[f].unit ? ', ' + READING_FIELDS[f].unit : '') + ')'; }).join(', ');
+  var prompt = 'This photo should show ' + pt.screen + '\nRead the numbers on the display. Hours shown as hours and minutes must be converted to ' +
+    'decimal hours (1286h 45m = 1286.75). A screen shows only some of the values: use null for anything not visible or not clearly readable. Never guess.\n' +
+    'Reply with JSON only: {' + want + ', "confidence": "high" | "medium" | "low", "seen": "a few words on what the photo shows"}';
+  var ai = { key: key, model: s.AI_MODEL || 'gemini-3.5-flash', backup: s.AI_MODEL_BACKUP || '', thinking: 'low' };
+  var res = geminiAsk_(ai, { contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/' + m[1], data: m[2] } }, { text: prompt }] }],
+    generationConfig: { temperature: 0, responseMimeType: 'application/json' } });
+  var c = res.candidates && res.candidates[0] && res.candidates[0].content;
+  var text = c && c.parts ? c.parts.filter(function (x) { return x.text && !x.thought; }).map(function (x) { return x.text; }).join('') : '';
+  var out = {};
+  try { out = JSON.parse(String(text).replace(/^[^{]*/, '').replace(/[^}]*$/, '')); } catch (e) { out = {}; }
+  var values = {};
+  pt.fields.forEach(function (f) {
+    var n = Number(out[f]), d = READING_FIELDS[f];
+    if (out[f] === null || out[f] === undefined || out[f] === '' || !isFinite(n) || n < 0) return;
+    if (d.max !== undefined && n > d.max) return;
+    values[f] = roundTo_(n, d.dec);
+  });
+  return { values: values, confidence: /^(high|medium|low)$/.test(out.confidence) ? out.confidence : 'low', seen: short_(out.seen, 160) };
+}
+
+/* ---------------------------------------------------------------- saving */
+
+function apiReadingSave_(p) {
+  var u = auth_(p, TEAM_ROLES);
+  ensureReadings_();
+  var pt = readingPoint_(p.point), s = settings_(), note = clean_(p.note, 500), values = {}, ai = p.ai || {};
+  pt.fields.forEach(function (f) {
+    var raw = p.values ? p.values[f] : '';
+    if (raw === '' || raw === null || raw === undefined) return;
+    var n = num_(raw), d = READING_FIELDS[f];
+    if (n === '' || n < 0 || (d.max !== undefined && n > d.max)) throw userError_(d.label + ': not a valid number.');
+    values[f] = roundTo_(n, d.dec);
+  });
+  if (values[pt.meter] === undefined) throw userError_(READING_FIELDS[pt.meter].label + ' is needed.');
+  var photos = (p.photos || []).filter(String).slice(0, 4);
+  if (!photos.length && !note) throw userError_('Take a photo of the meter, or write in the note why there is none.');
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    TABLE_CACHE_ = {};
+    var now = new Date(), date = Utilities.formatDate(now, TZ, 'yyyy-MM-dd'), time = Utilities.formatDate(now, TZ, 'HH:mm');
+    var rows = readingRows_(pt.id), last = rows[rows.length - 1], problems = [];
+    if (last) {
+      var hoursPassed = (now.getTime() - last.at.getTime()) / 3600000;
+      pt.fields.forEach(function (f) {
+        var d = READING_FIELDS[f], was = last.values[f], v = values[f];
+        if (!d.rising || v === undefined || was === undefined) return;
+        if (v < was) problems.push(d.label + ' ' + v + ' is LOWER than the last reading (' + was + ' on ' + last.date + ')');
+        else if (d.unit === 'h' && v - was > hoursPassed + 1) problems.push(d.label + ' went up ' + roundTo_(v - was, 1) + ' h, more than the ' + Math.round(hoursPassed) + ' h that passed since ' + last.date);
+      });
+      if (values.LoadedHours !== undefined && values.Hours !== undefined && last.values.LoadedHours !== undefined && last.values.Hours !== undefined &&
+        values.LoadedHours - last.values.LoadedHours > values.Hours - last.values.Hours + 0.5) problems.push('Loaded hours went up more than running hours');
+    }
+    if (values.LoadedHours !== undefined && values.Hours !== undefined && values.LoadedHours > values.Hours) problems.push('Loaded hours cannot be more than running hours');
+    if (problems.length && !note) throw userError_(problems.join('. ') + '. Check the numbers. If they are right, write why in the note and save again.');
+
+    var corrected = Object.keys(ai).some(function (f) { return ai[f] !== '' && ai[f] !== null && values[f] !== undefined && Number(ai[f]) !== values[f]; });
+    var keep = corrected || problems.length || !!note;
+    var id = 'RD-' + ('0000' + (readTable_('Readings').rows.filter(function (r) { return r.ReadingID; }).length + 1)).slice(-4);
+    while (find_(readTable_('Readings').rows, 'ReadingID', id)) id = 'RD-' + ('0000' + (Number(id.slice(3)) + 1)).slice(-4);
+    var ids = photos.map(function (ph, i) { return savePhoto_(ph, pt.assetId + ' ' + date + ' ' + time.replace(':', '') + (photos.length > 1 ? '-' + (i + 1) : '')); });
+    var until = !ids.length ? '' : keep ? 'keep' : Utilities.formatDate(new Date(now.getTime() + (Number(s.PHOTO_KEEP_DAYS) || 30) * 86400000), TZ, 'yyyy-MM-dd');
+    var row = { ReadingID: id, Date: date, Time: time, Point: pt.id, AssetID: pt.assetId, AIRead: Object.keys(ai).filter(function (f) { return ai[f] !== '' && ai[f] !== null; })
+      .map(function (f) { return f + ' ' + ai[f]; }).join('; '), Corrected: Object.keys(ai).length ? (corrected ? 'Yes' : 'No') : '',
+      Photos: ids.join(','), PhotoUntil: until, By: u.Name, Note: note + (problems.length ? (note ? ' ' : '') + '[' + problems.join('; ') + ']' : ''), Created: now };
+    Object.keys(values).forEach(function (f) { row[f] = values[f]; });
+    appendObj_('Readings', row);
+
+    var at = readTable_('Assets', true), a = find_(at.rows, 'AssetID', pt.assetId);
+    if (a && (String(a.CurrentMeter) === '' || values[pt.meter] >= Number(a.CurrentMeter) || problems.length)) {
+      setCells_(at, a, { CurrentMeter: values[pt.meter], MeterUpdated: now, MeterUnit: a.MeterUnit || READING_FIELDS[pt.meter].unit });
+    }
+    TABLE_CACHE_ = {};
+    var sum = pointSummary_(pt, s, now);
+    var urgent = sum.alerts.filter(function (x) { return x.notify; });
+    if (problems.length) urgent.push({ tone: 'bad', title: pt.name + ': ' + problems.join('; '), detail: 'Note: ' + note });
+    if (urgent.length) {
+      notifyRoles_(MANAGER_ROLES, '⚠️ <b>Daily reading – ' + esc_(pt.name) + '</b> by ' + esc_(u.Name) + '\n' +
+        urgent.map(function (x) { return '• ' + esc_(x.title) + (x.detail ? ' – ' + esc_(x.detail) : ''); }).join('\n') + '\n\n' + s.APP_URL + 'app.html#readings', u.UserID);
+    }
+    return { id: id, point: pt.id, values: values, since: last ? Object.keys(values).reduce(function (o, f) {
+      if (last.values[f] !== undefined && READING_FIELDS[f].rising) o[f] = roundTo_(values[f] - last.values[f], 2); return o; }, {}) : null,
+      summary: sum };
+  } finally { lock.releaseLock(); }
+}
+
+function apiRefillSave_(p) {
+  var u = auth_(p, TEAM_ROLES);
+  ensureReadings_();
+  var d = p.refill || {}, s = settings_();
+  var litres = num_(d.litres), hours = num_(d.hours), before = num_(d.fuelBefore), after = num_(d.fuelAfter);
+  if (!(litres > 0 && litres <= 5000)) throw userError_('Type the litres filled.');
+  if (hours === '' || hours < 0) throw userError_('Type the generator hour meter at the refill.');
+  [before, after].forEach(function (x) { if (x !== '' && (x < 0 || x > 100)) throw userError_('Fuel level must be 0–100 %.'); });
+  var today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  var date = /^\d{4}-\d{2}-\d{2}$/.test(String(d.date || '')) ? String(d.date) : today;
+  if (date > today) throw userError_('The date cannot be in the future.');
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    TABLE_CACHE_ = {};
+    var rows = fuelRows_(), now = new Date();
+    var id = 'FL-' + ('0000' + (rows.length + 1)).slice(-4);
+    while (find_(readTable_('FuelLog').rows, 'RefillID', id)) id = 'FL-' + ('0000' + (Number(id.slice(3)) + 1)).slice(-4);
+    var photo = d.photo ? savePhoto_(d.photo, 'EN-PS-06 diesel ' + date + ' ' + litres + 'L') : '';
+    appendObj_('FuelLog', { RefillID: id, Date: date, AssetID: 'EN-PS-06', Litres: roundTo_(litres, 1), Hours: roundTo_(hours, 2), FuelBefore: before, FuelAfter: after,
+      Photos: photo, PhotoUntil: photo ? Utilities.formatDate(new Date(now.getTime() + (Number(s.PHOTO_KEEP_DAYS) || 30) * 86400000), TZ, 'yyyy-MM-dd') : '',
+      By: u.Name, Note: clean_(d.note, 500), Exclude: '', Created: now });
+    return { id: id, date: date, litres: roundTo_(litres, 1), hours: roundTo_(hours, 2) };
+  } finally { lock.releaseLock(); }
+}
+
+/* ---------------------------------------------------------------- summary, alerts, history */
+
+function apiReadingsHome_(p) {
+  auth_(p);
+  ensureReadings_();
+  var sum = readingsSummary_();
+  sum.points.forEach(function (x) { x.recent = readingRows_(x.id).slice(-5).reverse().map(readingOut_); });
+  sum.refills = fuelRows_().slice(-5).reverse();
+  return sum;
+}
+
+function apiReadingsList_(p) {
+  auth_(p);
+  ensureReadings_();
+  var from = Date.now() - Math.min(366, Number(p.days) || 31) * 86400000;
+  return { rows: readingRows_(p.point ? readingPoint_(p.point).id : '').filter(function (r) { return r.at.getTime() >= from; }).reverse().map(readingOut_) };
+}
+
+function readingOut_(r) {
+  return { id: r.id, point: r.point, date: r.date, time: r.time, values: r.values, by: r.by, note: r.note, corrected: r.corrected,
+    photos: r.photoUntil === 'deleted' ? [] : r.photos.map(photoUrl_) };
+}
+
+/** Everything the page, the dashboard, the bot and the Command Centre show about the daily readings. */
+function readingsSummary_() {
+  var s = settings_(), now = new Date();
+  var points = READING_POINTS.map(function (pt) { return pointSummary_(pt, s, now); });
+  var alerts = [];
+  points.forEach(function (x) { x.alerts.forEach(function (a) { alerts.push({ point: x.id, tone: a.tone, title: a.title, detail: a.detail }); }); });
+  var order = { bad: 0, warn: 1, info: 2 };
+  alerts.sort(function (a, b) { return order[a.tone] - order[b.tone]; });
+  return { today: Utilities.formatDate(now, TZ, 'yyyy-MM-dd'), byHour: Number(s.READING_BY_HOUR) || 10, tankLitres: Number(s.GEN_TANK_LITRES) || 0,
+    points: points, alerts: alerts, doneToday: points.filter(function (x) { return x.doneToday; }).length };
+}
+
+function pointSummary_(pt, s, now) {
+  var today = Utilities.formatDate(now, TZ, 'yyyy-MM-dd'), hourNow = Number(Utilities.formatDate(now, TZ, 'H'));
+  var rows = readingRows_(pt.id), last = rows[rows.length - 1] || null, alerts = [], stats = {};
+  var byHour = Number(s.READING_BY_HOUR) || 10;
+  var out = { id: pt.id, assetId: pt.assetId, name: pt.name, fields: pt.fields, meter: pt.meter, last: last ? readingOut_(last) : null,
+    doneToday: !!(last && last.date === today), stats: stats, alerts: alerts };
+  if (!last) { alerts.push({ tone: 'info', title: pt.name + ': no readings yet', detail: '' }); return out; }
+
+  var days = Math.round((Date.parse(today) - Date.parse(last.date)) / 86400000);
+  if (days >= 2) alerts.push({ tone: 'bad', title: pt.name + ': no reading for ' + days + ' days', detail: 'Last on ' + last.date + (last.by ? ' by ' + last.by : '') });
+  else if (days === 1 && hourNow >= byHour) alerts.push({ tone: 'warn', title: pt.name + ': today\'s reading is missing', detail: 'Due by ' + byHour + ':00. Last on ' + last.date + (last.by ? ' by ' + last.by : '') });
+  var d30 = now.getTime() - 30 * 86400000;
+  for (var i = 1; i < rows.length; i++) {
+    if (rows[i].at.getTime() < d30) continue;
+    var back = rows[i].values[pt.meter] < rows[i - 1].values[pt.meter];
+    if (back) alerts.push({ tone: 'bad', title: pt.name + ': meter went backwards on ' + rows[i].date, detail: rows[i].values[pt.meter] + ' after ' + rows[i - 1].values[pt.meter] + (rows[i].note ? ' · ' + rows[i].note : '') });
+  }
+  // a window of readings: the last reading and the latest one at least `span` days before it
+  var windowFrom = function (span) {
+    var cut = last.at.getTime() - span * 86400000, base = null;
+    rows.forEach(function (r) { if (r.at.getTime() <= cut) base = r; });
+    return base || (rows.length > 1 ? rows[0] : null);
+  };
+  var monthStart = today.slice(0, 8) + '01', before = null, firstIn = null;
+  rows.forEach(function (r) { if (r.date < monthStart) before = r; else if (!firstIn) firstIn = r; });
+  var mBase = before && Date.parse(monthStart) - Date.parse(before.date) <= 3 * 86400000 ? before : firstIn;
+
+  if (pt.id === 'GEN') {
+    var tank = Number(s.GEN_TANK_LITRES) || 0, min = Number(s.GEN_LPH_MIN) || 10, max = Number(s.GEN_LPH_MAX) || 45, low = Number(s.GEN_FUEL_LOW_PCT) || 25;
+    if (mBase && mBase !== last && last.date >= monthStart) { stats.monthHours = roundTo_(last.values.Hours - mBase.values.Hours, 1); stats.monthFrom = mBase.date;
+      if (last.values.Starts !== undefined && mBase.values.Starts !== undefined) stats.monthStarts = last.values.Starts - mBase.values.Starts; }
+    var fuel = rows.filter(function (r) { return r.values.FuelPct !== undefined; }), lastFuel = fuel[fuel.length - 1];
+    if (lastFuel) {
+      stats.fuelPct = lastFuel.values.FuelPct; stats.fuelDate = lastFuel.date;
+      if (tank) stats.fuelLitres = Math.round(lastFuel.values.FuelPct / 100 * tank);
+      if (lastFuel.values.FuelPct < low) alerts.push({ tone: lastFuel.values.FuelPct < low / 2 ? 'bad' : 'warn', notify: lastFuel === last,
+        title: 'Generator fuel low: ' + lastFuel.values.FuelPct + '%' + (tank ? ' (about ' + stats.fuelLitres + ' L of ' + tank + ' L)' : ''), detail: 'Read on ' + lastFuel.date + '. Plan a diesel refill.' });
+    }
+    // diesel use from fuel % + refills over the last 30 days of readings (needs >= 2 h of running)
+    var refills = fuelRows_().filter(function (f) { return !f.exclude; });
+    if (tank && fuel.length >= 2) {
+      var a = null; fuel.forEach(function (r) { if (r.at.getTime() <= lastFuel.at.getTime() - 30 * 86400000) a = r; });
+      a = a || fuel[0];
+      var ran = lastFuel.values.Hours - a.values.Hours;
+      if (ran >= 2) {
+        var fed = refills.filter(function (f) { return f.created > a.at.getTime() && f.created <= lastFuel.at.getTime() + 600000; }).reduce(function (t, f) { return t + f.litres; }, 0);
+        var used = (a.values.FuelPct - lastFuel.values.FuelPct) / 100 * tank + fed;
+        stats.lph = roundTo_(used / ran, 1); stats.lphFrom = a.date; stats.lphHours = roundTo_(ran, 1);
+      }
+    }
+    // old records: litres of each refill / hours since the previous refill, only for refills before fuel % was read daily
+    var firstPct = fuel[0] ? fuel[0].date : '9999';
+    var counted = refills.filter(function (f) { return f.hours !== null && f.date <= firstPct && f.created <= (fuel[0] ? fuel[0].at.getTime() : Infinity); });
+    if (counted.length >= 2) {
+      var span = counted[counted.length - 1].hours - counted[0].hours, usedAll = counted.slice(1).reduce(function (t, f) { return t + f.litres; }, 0);
+      if (span >= 1) stats.lphRefills = roundTo_(usedAll / span, 1);
+    }
+    var lphNow = stats.lph !== undefined ? stats.lph : stats.lphRefills;
+    if (lphNow !== undefined && (lphNow < min || lphNow > max)) alerts.push({ tone: 'warn', title: 'Generator diesel use ' + lphNow + ' L/h', detail: 'Normal ' + min + '–' + max + ' L/h. Check for a leak, a wrong entry or an unusual load.' });
+    stats.lphRange = [min, max];
+    stats.lastRefill = refills[refills.length - 1] || null;
+  }
+  if (pt.id === 'COMP') {
+    var b = windowFrom(7);
+    if (b && last.values.Hours !== undefined && b.values.Hours !== undefined) {
+      var run = last.values.Hours - b.values.Hours, span2 = (last.at - b.at) / 86400000;
+      stats.windowDays = roundTo_(span2, 1); stats.runHours = roundTo_(run, 1);
+      if (span2 > 0) stats.runPerDay = roundTo_(run / span2, 1);
+      if (last.values.LoadedHours !== undefined && b.values.LoadedHours !== undefined && run > 0) {
+        stats.loadedHours = roundTo_(last.values.LoadedHours - b.values.LoadedHours, 1);
+        stats.loadPct = Math.round(stats.loadedHours / run * 100);
+      }
+      if (last.values.Starts !== undefined && b.values.Starts !== undefined && span2 > 0) {
+        var st = last.values.Starts - b.values.Starts;
+        stats.startsPerDay = Math.round(st / span2);
+        if (run > 0) stats.startsPerRunHour = roundTo_(st / run, 1);
+      }
+      var minLoad = Number(s.COMP_MIN_LOAD_PCT) || 30;
+      if (stats.loadPct !== undefined && run >= 5 && stats.loadPct < minLoad) alerts.push({ tone: 'warn', title: 'Compressor loaded only ' + stats.loadPct + '% of its running time',
+        detail: stats.loadedHours + ' h loaded of ' + stats.runHours + ' h running in the last ' + stats.windowDays + ' days, ' + (stats.startsPerDay || 0) + ' starts a day. Running unloaded wastes power: check air leaks and the pressure settings.' });
+    }
+    if (last.values.Hours && last.values.LoadedHours !== undefined) stats.lifeLoadPct = Math.round(last.values.LoadedHours / last.values.Hours * 100);
+  }
+  if (pt.id === 'WATER') {
+    var rates = [];
+    for (var j = 1; j < rows.length; j++) {
+      var dd = (rows[j].at - rows[j - 1].at) / 86400000;
+      if (dd >= 0.5) rates.push({ date: rows[j].date, perDay: (rows[j].values.WaterM3 - rows[j - 1].values.WaterM3) / dd });
+    }
+    if (rates.length) {
+      var lastRate = rates[rates.length - 1], prev = rates.slice(-15, -1).filter(function (r) { return r.perDay >= 0; });
+      stats.lastPerDay = roundTo_(lastRate.perDay, 1); stats.lastDate = lastRate.date;
+      if (prev.length) {
+        stats.avgPerDay = roundTo_(prev.reduce(function (t, r) { return t + r.perDay; }, 0) / prev.length, 1);
+        var f = Number(s.WATER_HIGH_FACTOR) || 1.5;
+        if (prev.length >= 3 && lastRate.perDay > stats.avgPerDay * f && lastRate.perDay - stats.avgPerDay > 1) alerts.push({ tone: 'warn', notify: true,
+          title: 'High water use: ' + stats.lastPerDay + ' m³ a day', detail: 'Usual ' + stats.avgPerDay + ' m³ a day. Check for a leak, an overflowing tank or a tap left open.' });
+      }
+    }
+    if (mBase && mBase !== last && last.date >= monthStart) { stats.monthM3 = roundTo_(last.values.WaterM3 - mBase.values.WaterM3, 1); stats.monthFrom = mBase.date; }
+  }
+  return out;
+}
+
+/** hourlyTick: reminder when readings are missing at READING_BY_HOUR, photo clean-up at 01:00. */
+function readingsTick_(hour) {
+  var ss = db_();
+  if (!ss.getSheetByName('Readings')) return;
+  var s = settings_();
+  var cache = CacheService.getScriptCache(), remindKey = 'readings_remind_' + Utilities.formatDate(new Date(), TZ, 'yyyyMMdd');
+  if (hour === (Number(s.READING_BY_HOUR) || 10) && Utilities.formatDate(new Date(), TZ, 'u') !== '7' && !cache.get(remindKey)) {
+    cache.put(remindKey, '1', 21600);
+    var sum = readingsSummary_(), missing = sum.points.filter(function (x) { return !x.doneToday; });
+    if (missing.length) {
+      var msg = '⏰ <b>Daily readings missing</b>\n' + missing.map(function (x) { return '• ' + esc_(x.name); }).join('\n') +
+        '\n\nTake them now: ' + s.APP_URL + 'app.html#readings';
+      readTable_('Users').rows.forEach(function (u) {
+        if (isActive_(u) && u.TelegramChatID && TEAM_ROLES.indexOf(String(u.Role || '').toLowerCase()) >= 0) tgSend_(u.TelegramChatID, msg);
+      });
+    }
+  }
+  if (hour === 1) cleanReadingPhotos_();
+}
+
+/** Deletes meter photos whose keep-until date has passed (the numbers stay). */
+function cleanReadingPhotos_() {
+  var today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), n = 0;
+  ['Readings', 'FuelLog'].forEach(function (tab) {
+    if (!db_().getSheetByName(tab)) return;
+    var t = readTable_(tab, true);
+    t.rows.forEach(function (r) {
+      var until = String(r.PhotoUntil || '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(until) || until >= today || !r.Photos) return;
+      list_(r.Photos).forEach(function (id) { try { DriveApp.getFileById(id).setTrashed(true); n++; } catch (e) { /* already gone */ } });
+      setCells_(t, r, { Photos: '', PhotoUntil: 'deleted' });
+    });
+  });
+  return n;
+}
+
+/** Short lines for the managers' morning digest. */
+function readingsDigestLines_() {
+  if (!db_().getSheetByName('Readings')) return [];
+  var sum = readingsSummary_(), lines = [];
+  sum.points.forEach(function (x) {
+    if (!x.last) return;
+    var v = x.last.values, st = x.stats, l = '• ' + x.name + ': ';
+    if (x.id === 'GEN') l += v.Hours + ' h' + (st.fuelPct !== undefined ? ', fuel ' + st.fuelPct + '%' : '') + (st.lph !== undefined ? ', ' + st.lph + ' L/h' : '');
+    if (x.id === 'COMP') l += v.Hours + ' h' + (st.loadPct !== undefined ? ', loaded ' + st.loadPct + '% (7 days)' : '') + (st.startsPerDay !== undefined ? ', ' + st.startsPerDay + ' starts/day' : '');
+    if (x.id === 'WATER') l += v.WaterM3 + ' m³' + (st.lastPerDay !== undefined ? ', ' + st.lastPerDay + ' m³/day' : '');
+    lines.push(esc_(l + ' (' + x.last.date + ')'));
+  });
+  sum.alerts.filter(function (a) { return a.tone !== 'info' && !/missing|no reading/.test(a.title); }).forEach(function (a) { lines.push('⚠️ ' + esc_(a.title)); });
+  return lines;
+}
+
+/* =========================================================================
  * Telegram
  * ========================================================================= */
 
@@ -1531,7 +1966,12 @@ var BOT_TOOLS = [
   { name: 'cost_report', description: 'Bills and costs between dates, with totals by type, project, machine and supplier.', parameters: { type: 'OBJECT', properties: {
     from: { type: 'STRING', description: 'yyyy-mm-dd' }, to: { type: 'STRING', description: 'yyyy-mm-dd' }, type: { type: 'STRING' }, project: { type: 'STRING' },
     asset_id: { type: 'STRING' }, query: { type: 'STRING' } } } },
-  { name: 'summary', description: 'Plant maintenance summary: open / overdue jobs, PM due, compliance, certificates, costs this month.' }
+  { name: 'summary', description: 'Plant maintenance summary: open / overdue jobs, PM due, compliance, certificates, costs this month.' },
+  { name: 'get_readings', description: 'Daily meter readings and their alerts: generator (hours, starts, fuel %, diesel L/h), air compressor (running / loaded hours, loaded %, starts a day), water meter (m³, daily use).' },
+  { name: 'record_refill', description: 'Record a diesel refill of the generator (EN-PS-06): litres filled and the generator hour meter at the refill.', parameters: { type: 'OBJECT', properties: {
+    litres: { type: 'NUMBER' }, hours: { type: 'NUMBER', description: 'generator hour meter at the refill' }, date: { type: 'STRING', description: 'yyyy-mm-dd, default today' },
+    fuel_before: { type: 'NUMBER', description: 'fuel level % before filling, if known' }, fuel_after: { type: 'NUMBER', description: 'fuel level % after filling, if known' },
+    note: { type: 'STRING' } }, required: ['litres', 'hours'] } }
 ];
 
 /** generationConfig.thinkingConfig for the AI_THINKING setting (Gemini 2.x takes a token budget, newer models a level). */
@@ -1597,7 +2037,7 @@ function gemini_(key, model, body) {
 
 function botAi_(u, chatId, text, file, key) {
   var s = settings_();
-  var ai = { key: key, model: s.AI_MODEL || 'gemini-3.8-flash', backup: s.AI_MODEL_BACKUP || '', thinking: s.AI_THINKING };
+  var ai = { key: key, model: s.AI_MODEL || 'gemini-3.5-flash', backup: s.AI_MODEL_BACKUP || '', thinking: s.AI_THINKING };
   var hist = botMemory_(chatId);
   var lastFile = null;
   try { lastFile = JSON.parse(CacheService.getScriptCache().get('tgf_' + chatId) || 'null'); } catch (e) { lastFile = null; }
@@ -1642,7 +2082,7 @@ function botAi_(u, chatId, text, file, key) {
  * ========================================================================= */
 
 var BRIDGE_KEY_FILE = 'TVS Command Centre - bridge key (private, do not share)';
-var BRIDGE_TOOLS = ['find_jobs', 'get_job', 'job_action', 'create_job'];
+var BRIDGE_TOOLS = ['find_jobs', 'get_job', 'job_action', 'create_job', 'get_readings'];
 
 function apiBridge_(p) {
   bridgeCheck_(p.key);
@@ -1707,6 +2147,9 @@ function runBotTool_(name, a, ctx) {
       description: short_(j.description, 120), assigned: j.assignedName, overdue: j.overdue, created: ymd_(j.created) };
   };
   switch (name) {
+    case 'get_readings': ensureReadings_(); return readingsSummary_();
+    case 'record_refill':
+      return apiRefillSave_({ token: tok, refill: { date: a.date, litres: a.litres, hours: a.hours, fuelBefore: a.fuel_before, fuelAfter: a.fuel_after, note: a.note } });
     case 'find_jobs': {
       var r = apiJobs_({ token: tok, view: a.view || 'open', q: a.query || '' });
       return { total: r.total, jobs: r.jobs.slice(0, 15).map(job) };
@@ -1920,6 +2363,7 @@ function hourlyTick() {
     notifyRoles_(MANAGER_ROLES, msg, w.AssignedTo);
     setCells_(t, w, { LastOverdueAlert: now });
   });
+  try { readingsTick_(hour); } catch (err) { logError_('readingsTick', err); }
 }
 
 /**
@@ -1944,6 +2388,8 @@ function dailyDigest() {
     .filter(function (x) { return x.state === 'overdue' || x.state === 'today'; })
     .sort(function (a, b) { return b.daysLate - a.daysLate; });
   var certLines = certAlerts_(assets, s);
+  var readLines = [];
+  try { readLines = readingsDigestLines_(); } catch (err) { logError_('readingsDigest', err); }
   var pmLine = function (x) {
     return '• ' + esc_(x.assetId + ' ' + short_(x.title, 40)) + (x.state === 'overdue' ? ' – <b>' + x.daysLate + ' d late</b>' : ' – today') +
       (x.meterLeft !== null && x.meterLeft <= 0 ? ' (hours reached)' : '');
@@ -1979,6 +2425,10 @@ function dailyDigest() {
       if (myPm.length > 15) lines.push('… and ' + (myPm.length - 15) + ' more');
     } else {
       lines.push('', '🗓 No PM checks due today.');
+    }
+    if (mgr && readLines.length) {
+      lines.push('', '📟 <b>Daily readings</b>');
+      readLines.forEach(function (l) { lines.push(l); });
     }
     if (mgr && certLines.length) {
       lines.push('', '📄 <b>Inspection certificates</b>');
@@ -2232,7 +2682,7 @@ function nextWoId_(rows, now) {
 
 function settings_() {
   var out = {};
-  DEFAULT_SETTINGS.forEach(function (r) { out[r[0]] = r[1]; });
+  DEFAULT_SETTINGS.concat(READING_SETTINGS).forEach(function (r) { out[r[0]] = r[1]; });
   readTable_('Settings').rows.forEach(function (r) { if (r.Key) out[String(r.Key).trim()] = String(r.Value === undefined ? '' : r.Value).trim(); });
   if (out.APP_URL && !/\/$/.test(out.APP_URL)) out.APP_URL += '/';
   return out;
