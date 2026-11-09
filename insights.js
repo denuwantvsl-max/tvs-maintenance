@@ -169,10 +169,12 @@
       el('line', { x1: x(e.t), x2: x(e.t), y1: T, y2: H - B, stroke: 'var(--axis)', 'stroke-width': 1 }, svg);
       el('text', { x: x(e.t) + 3, y: T + 8, class: 'lbl' }, svg).textContent = e.label;
     });
-    var nTicks = Math.max(2, Math.floor((W - L - R) / 70));
+    // short spans (< 2 days): only the two ends, with the time; otherwise evenly spaced dates
+    var shortSpan = t1 - t0 < 2 * 86400000, nTicks = shortSpan ? 1 : Math.max(2, Math.min(Math.round((t1 - t0) / 86400000), Math.floor((W - L - R) / 70)));
+    var stamp = function (tt) { var dd = new Date(tt); return dd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + (shortSpan ? ' ' + dd.toTimeString().slice(0, 5) : ''); };
     for (var k = 0; k <= nTicks; k++) {
       var tt = t0 + (t1 - t0) * k / nTicks;
-      el('text', { x: x(tt), y: H - 6, 'text-anchor': k === 0 ? 'start' : k === nTicks ? 'end' : 'middle' }, svg).textContent = dayLabel(new Date(tt).toISOString().slice(0, 10));
+      el('text', { x: x(tt), y: H - 6, 'text-anchor': k === 0 ? 'start' : k === nTicks ? 'end' : 'middle' }, svg).textContent = stamp(tt);
     }
     el('path', { d: pts.map(function (p, i) { return (i ? 'L' : 'M') + x(p.t) + ',' + y(p.value); }).join(''), fill: 'none', stroke: o.color, 'stroke-width': 2, 'stroke-linejoin': 'round' }, svg);
     var tip = tipFor(box), cross = el('line', { y1: T, y2: H - B, stroke: 'var(--text-muted)', 'stroke-width': 1, opacity: 0 }, svg);
