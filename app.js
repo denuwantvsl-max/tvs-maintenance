@@ -1239,7 +1239,7 @@
     var gen = S.rd && S.rd.points.filter(function (x) { return x.id === 'GEN'; })[0];
     var photo = '';
     openSheet(t('rdRefillTitle'), '<div class="card">' +
-      '<div class="grid2"><div>' + field('rf_date', t('pmDoneAt') + ' *', '<input type="date" id="rf_date" value="' + esc(today) + '" max="' + esc(today) + '">') + '</div><div>' +
+      '<div class="grid2"><div>' + field('rf_date', t('pmDoneAt') + ' *', '<input type="datetime-local" id="rf_date" value="' + esc(C.toLocalInput(new Date().toISOString())) + '" max="' + esc(C.toLocalInput(new Date().toISOString())) + '">') + '</div><div>' +
       field('rf_l', t('rdLitres') + ' *', '<input type="text" inputmode="decimal" id="rf_l" autocomplete="off">') + '</div></div>' +
       field('rf_h', t('rdHoursAt') + ' *', '<input type="text" inputmode="decimal" id="rf_h" autocomplete="off" value="' + esc(gen && gen.last ? gen.last.values.Hours : '') + '">') +
       '<div class="hint">' + esc(t('rdHmHint')) + '</div>' +

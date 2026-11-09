@@ -117,7 +117,7 @@
       return { t: Date.parse(r.at), value: r.values.FuelPct, tip: '<b>' + esc(dayLong(r.date)) + ' ' + esc(r.time || '') + '</b><br>' + r.values.FuelPct + '% ≈ ' + Math.round(r.values.FuelPct / 100 * lim.tankLitres) + ' L' };
     });
     line($('cFuel'), fuelPts, { min: 0, max: 100, unit: '%', color: 'var(--series-1)', threshold: lim.fuelLowPct, thresholdLabel: 'low ' + lim.fuelLowPct + '%', title: 'Generator fuel level',
-      events: realRefills.map(function (f) { return { t: Date.parse(f.date + 'T12:00:00'), label: '+' + num(f.litres, 0) + ' L' }; }) });
+      events: realRefills.map(function (f) { return { t: f.at ? Date.parse(f.at) : Date.parse(f.date + 'T12:00:00'), label: '+' + num(f.litres, 0) + ' L' }; }) });
     stacked($('cComp'), cR.map(function (x) {
       var l = lByDay[x.date] ? Math.max(0, lByDay[x.date].perDay) : 0, r = Math.max(0, x.perDay), u = Math.max(0, r - l);
       return { label: dayLabel(x.date), a: l, b: u, tip: tipDay(x, 'Running ' + num(r, 1) + ' h<br>Loaded ' + num(l, 1) + ' h (' + (r ? Math.round(l / r * 100) : 0) + '%)<br>Unloaded ' + num(u, 1) + ' h') };

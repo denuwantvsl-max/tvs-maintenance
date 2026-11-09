@@ -1347,7 +1347,7 @@ function roundTo_(n, dec) { var f = Math.pow(10, dec); return Math.round(n * f) 
 
 /** Readings of one point as plain objects, oldest first. */
 function readingRows_(pointId) {
-  return readTable_('Readings').rows.filter(function (r) { return r.ReadingID && (!pointId || r.Point === pointId); }).map(function (r) {
+  var list = readTable_('Readings').rows.filter(function (r) { return r.ReadingID && (!pointId || r.Point === pointId); }).map(function (r) {
     var v = {};
     Object.keys(READING_FIELDS).forEach(function (k) { if (r[k] !== '' && r[k] !== undefined && isFinite(Number(r[k]))) v[k] = Number(r[k]); });
     var date = r.Date instanceof Date ? Utilities.formatDate(r.Date, TZ, 'yyyy-MM-dd') : String(r.Date || '').slice(0, 10);
@@ -1356,15 +1356,33 @@ function readingRows_(pointId) {
       values: v, by: String(r.By || ''), note: String(r.Note || ''), corrected: String(r.Corrected || ''), aiRead: String(r.AIRead || ''),
       photos: list_(r.Photos), photoUntil: String(r.PhotoUntil || '') };
   }).filter(function (r) { return r.at; }).sort(function (a, b) { return a.at - b.at || a.id.localeCompare(b.id); });
+  return dropDips_(list);
+}
+
+/** Leaves out a reading whose main meter value is lower than BOTH the reading before and after it (a misread that was
+ *  re-entered); a real meter reset keeps going from the low value, so it is not removed. The row stays in the sheet. */
+function dropDips_(list) {
+  var bad = {};
+  READING_POINTS.forEach(function (pt) {
+    var rs = list.filter(function (r) { return r.point === pt.id && r.values[pt.meter] !== undefined; });
+    for (var i = 1; i < rs.length - 1; i++) {
+      var v = rs[i].values[pt.meter];
+      if (v < rs[i - 1].values[pt.meter] && rs[i + 1].values[pt.meter] >= rs[i - 1].values[pt.meter]) bad[rs[i].id] = 1;
+    }
+  });
+  return list.filter(function (r) { return !bad[r.id]; });
 }
 
 function fuelRows_() {
   return readTable_('FuelLog').rows.filter(function (r) { return r.RefillID; }).map(function (r) {
-    var date = r.Date instanceof Date ? Utilities.formatDate(r.Date, TZ, 'yyyy-MM-dd') : String(r.Date || '').slice(0, 10);
-    return { id: String(r.RefillID), date: date, litres: Number(r.Litres) || 0, hours: r.Hours === '' ? null : Number(r.Hours),
+    var raw = r.Date instanceof Date ? Utilities.formatDate(r.Date, TZ, 'yyyy-MM-dd HH:mm') : String(r.Date || '').trim();
+    var date = raw.slice(0, 10), time = /^\d{4}-\d{2}-\d{2}[ T](\d{2}:\d{2})/.test(raw) ? raw.slice(11, 16) : '';
+    if (time === '00:00' && r.Date instanceof Date) time = '';
+    var at = parseLocal_(date + 'T' + (time || '12:00'));
+    return { id: String(r.RefillID), date: date, time: time, at: at ? at.toISOString() : '', litres: Number(r.Litres) || 0, hours: r.Hours === '' ? null : Number(r.Hours),
       before: r.FuelBefore === '' ? null : Number(r.FuelBefore), after: r.FuelAfter === '' ? null : Number(r.FuelAfter),
       by: String(r.By || ''), note: String(r.Note || ''), exclude: yes_(r.Exclude), created: dateNum_(r.Created) };
-  }).sort(function (a, b) { return a.date.localeCompare(b.date) || a.id.localeCompare(b.id); });
+  }).sort(function (a, b) { return (a.at || a.date).localeCompare(b.at || b.date) || a.id.localeCompare(b.id); });
 }
 
 /* ---------------------------------------------------------------- AI reading of a photo */
@@ -1481,11 +1499,13 @@ function apiRefillSave_(p) {
   var d = p.refill || {}, s = settings_();
   var litres = num_(d.litres), hours = num_(d.hours), before = num_(d.fuelBefore), after = num_(d.fuelAfter);
   if (!(litres > 0 && litres <= 5000)) throw userError_('Type the litres filled.');
-  if (hours === '' || hours < 0) throw userError_('Type the generator hour meter at the refill.');
+  if (hours !== '' && hours < 0) throw userError_('The hour meter cannot be negative.');
+  if (hours === '' && !clean_(d.note, 500)) throw userError_('Type the generator hour meter at the refill (or write in the note why it was not read).');
   [before, after].forEach(function (x) { if (x !== '' && (x < 0 || x > 100)) throw userError_('Fuel level must be 0–100 %.'); });
   var today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
-  var date = /^\d{4}-\d{2}-\d{2}$/.test(String(d.date || '')) ? String(d.date) : today;
-  if (date > today) throw userError_('The date cannot be in the future.');
+  var m = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}))?$/.exec(String(d.date || '').trim());
+  var date = m ? m[1] : today, time = m && m[2] ? m[2] : (m ? '' : Utilities.formatDate(new Date(), TZ, 'HH:mm'));
+  if (date > today || (time && parseLocal_(date + 'T' + time) > new Date(Date.now() + 10 * 60000))) throw userError_('The date cannot be in the future.');
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -1494,10 +1514,10 @@ function apiRefillSave_(p) {
     var id = 'FL-' + ('0000' + (rows.length + 1)).slice(-4);
     while (find_(readTable_('FuelLog').rows, 'RefillID', id)) id = 'FL-' + ('0000' + (Number(id.slice(3)) + 1)).slice(-4);
     var photo = d.photo ? savePhoto_(d.photo, 'EN-PS-06 diesel ' + date + ' ' + litres + 'L') : '';
-    appendObj_('FuelLog', { RefillID: id, Date: date, AssetID: 'EN-PS-06', Litres: roundTo_(litres, 1), Hours: roundTo_(hours, 2), FuelBefore: before, FuelAfter: after,
+    appendObj_('FuelLog', { RefillID: id, Date: date + (time ? ' ' + time : ''), AssetID: 'EN-PS-06', Litres: roundTo_(litres, 1), Hours: hours === '' ? '' : roundTo_(hours, 2), FuelBefore: before, FuelAfter: after,
       Photos: photo, PhotoUntil: photo ? Utilities.formatDate(new Date(now.getTime() + (Number(s.PHOTO_KEEP_DAYS) || 30) * 86400000), TZ, 'yyyy-MM-dd') : '',
       By: u.Name, Note: clean_(d.note, 500), Exclude: '', Created: now });
-    return { id: id, date: date, litres: roundTo_(litres, 1), hours: roundTo_(hours, 2) };
+    return { id: id, date: date, time: time, litres: roundTo_(litres, 1), hours: hours === '' ? null : roundTo_(hours, 2) };
   } finally { lock.releaseLock(); }
 }
 
@@ -1572,7 +1592,7 @@ function apiGenLog_(p) {
     readings: keep.map(function (r) { return { date: r.date, time: r.time, at: r.at.toISOString(), hours: r.values.Hours, starts: r.values.Starts, fuelPct: r.values.FuelPct, by: r.by, note: r.note }; }),
     runs: runs,
     refills: fuelRows_().filter(function (f) { return f.date >= fromDay; }).map(function (f) {
-      return { date: f.date, litres: f.litres, hours: f.hours, before: f.before, after: f.after, by: f.by, note: f.note, exclude: f.exclude }; }),
+      return { date: f.date, time: f.time, at: f.at, litres: f.litres, hours: f.hours, before: f.before, after: f.after, by: f.by, note: f.note, exclude: f.exclude }; }),
     limits: { tankLitres: Number(s.GEN_TANK_LITRES) || 0, lphMin: Number(s.GEN_LPH_MIN) || 10, lphMax: Number(s.GEN_LPH_MAX) || 45,
       lphExpected: Number(s.GEN_LPH_EXPECTED) || 16, fuelLowPct: Number(s.GEN_FUEL_LOW_PCT) || 25 },
     alerts: gen.alerts.filter(function (a) { return a.tone !== 'info'; }).map(function (a) { return { tone: a.tone, title: a.title, detail: a.detail }; }),
@@ -1681,7 +1701,7 @@ function pointSummary_(pt, s, now) {
     };
     var fuel = fuelAll.filter(function (r) { return hoursAt(r) !== null; });   // fuel readings with a known hour meter
     var refills = fuelRows_().filter(function (f) { return !f.exclude; });
-    var fedBetween = function (a, b) { return refills.filter(function (f) { return f.date > a.date && f.date <= b.date; }).reduce(function (t, f) { return t + f.litres; }, 0); };
+    var fedBetween = function (a, b) { return refills.filter(function (f) { var t = Date.parse(f.at); return t > a.at.getTime() && t <= b.at.getTime(); }).reduce(function (t, f) { return t + f.litres; }, 0); };
     if (lastFuel) {
       stats.fuelPct = lastFuel.values.FuelPct; stats.fuelDate = lastFuel.date;
       if (tank) stats.fuelLitres = Math.round(lastFuel.values.FuelPct / 100 * tank);

@@ -32,7 +32,8 @@
       return h !== null && next !== null && next > h + 0.05 ? null : h;   // ran in between: unknown
     };
     var refills = d.refills.filter(function (f) { return !f.exclude && f.litres > 0 && (!tank || f.litres <= tank); });
-    var fedBetween = function (a, b) { return refills.filter(function (f) { return f.date > a.date && f.date <= b.date; }).reduce(function (s, f) { return s + f.litres; }, 0); };
+    var refAt = function (f) { return f.at ? Date.parse(f.at) : Date.parse(f.date + 'T12:00:00'); };
+    var fedBetween = function (a, b) { return refills.filter(function (f) { var t = refAt(f); return t > a.t && t <= b.t; }).reduce(function (s, f) { return s + f.litres; }, 0); };
     var inP = function (x) { return x.date >= r.from && x.date <= r.to; };
     // hours run: meter at the last reading of the period minus the last reading before it (or the first in it)
     var withH = rd.filter(function (x) { return x.hours !== undefined && x.hours !== null; });
@@ -189,7 +190,7 @@
       return { t: x.t, value: x.fuelPct, tip: '<b>' + esc(dayLong(x.date)) + ' ' + esc(x.time || '') + '</b><br>' + x.fuelPct + '% ≈ ' + Math.round(x.fuelPct / 100 * lim.tankLitres) + ' L' };
     }).filter(function (p, i, arr) { return new Date(p.t) >= new Date(r.from + 'T00:00:00') || (arr[i + 1] && new Date(arr[i + 1].t) >= new Date(r.from + 'T00:00:00')); });
     line($('cFuel'), fuelPts, { min: 0, max: 100, unit: '%', color: 'var(--series-1)', threshold: lim.fuelLowPct, thresholdLabel: 'low ' + lim.fuelLowPct + '%', title: 'Generator tank level',
-      events: acc.refills.map(function (f) { return { t: Date.parse(f.date + 'T12:00:00'), label: '+' + num(f.litres, 0) + ' L' }; }) });
+      events: acc.refills.map(function (f) { return { t: f.at ? Date.parse(f.at) : Date.parse(f.date + 'T12:00:00'), label: '+' + num(f.litres, 0) + ' L' }; }) });
 
     $('period').addEventListener('click', function (e) {
       var b = e.target.closest('[data-p]'); if (!b) return;
@@ -220,7 +221,7 @@
         fuel: x.fuelStart !== null && x.fuelStop !== null ? x.fuelStart + '% → ' + x.fuelStop + '%' : '', litres: used !== null ? num(used, 0) + ' L used' : '', by: x.by, note: x.note, flag: '' });
     });
     acc.refills.forEach(function (f) {
-      out.push({ t: Date.parse(f.date + 'T12:00:00'), when: f.date, kind: 'Diesel refill', meter: f.hours !== null && f.hours !== undefined ? num(f.hours, 2) + ' h' : '',
+      out.push({ t: f.at ? Date.parse(f.at) : Date.parse(f.date + 'T12:00:00'), when: f.date + (f.time ? ' ' + f.time : ''), kind: 'Diesel refill', meter: f.hours !== null && f.hours !== undefined ? num(f.hours, 2) + ' h' : '',
         fuel: f.before !== null && f.after !== null ? f.before + '% → ' + f.after + '%' : '', litres: '+' + num(f.litres, 0) + ' L', by: f.by, note: f.note, flag: '' });
     });
     return out.sort(function (a, b) { return b.t - a.t; });

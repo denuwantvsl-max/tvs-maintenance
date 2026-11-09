@@ -97,6 +97,7 @@ const resetReadings = () => { const sh = F.active.getSheetByName('Readings'); sh
 resetReadings();
 addRow({ Date: day(-6), Time: '09:00', Point: 'GEN', AssetID: 'EN-PS-06', Hours: 1300, FuelPct: 80 });
 const fl = readTable_('FuelLog', true);
+setCells_(fl, find_(fl.rows, 'RefillID', 'FL-0003'), { Exclude: 'Yes' });   // keep the 3 Nov old-records total out of these date-relative checks
 appendObj_('FuelLog', { RefillID: 'FL-0100', Date: day(-3), AssetID: 'EN-PS-06', Litres: 100, Hours: 1305, Created: new Date(Date.now() - 3 * 86400000) });
 addRow({ Date: day(-1), Time: '09:00', Point: 'GEN', AssetID: 'EN-PS-06', Hours: 1310, FuelPct: 60 });
 gen = pt('GEN');
@@ -209,6 +210,23 @@ assert.ok(gen.alerts.some(a => /refill not recorded: fuel went up from 18% to 49
 assert.ok(gen.alerts.some(a => /diesel use 4.1 L\/h/.test(a.title) && /refill that was not recorded/.test(a.detail)));
 const glr = ok('genLog', { days: 30 });
 assert.strictEqual(glr.readings.length, 3);
+// stores: 200 L topped up on the Saturday around 14:00, hour meter not read
+fails('refillSave', { token: admin.token, refill: { litres: 200, date: day(-12) + 'T14:00' } }, /hour meter/);
+const sat = ok('refillSave', { token: admin.token, refill: { litres: 200, date: day(-12) + 'T14:00', note: 'Stores team: about 2 pm, hour meter not read' } });
+assert.strictEqual(sat.time, '14:00'); assert.strictEqual(sat.hours, null);
+assert.strictEqual(find_(rowsOf('FuelLog'), 'RefillID', sat.id).Date, day(-12) + ' 14:00');
+gen = pt('GEN');
+assert.ok(!gen.alerts.some(a => /refill not recorded/.test(a.title)), 'refill after the 03:28 reading is counted');
+assert.strictEqual(gen.stats.lph, 16.4, '(64-49)% of 440 L + 200 L over 16.22 h');
+assert.ok(!gen.alerts.some(a => /diesel use/.test(a.title)));
+assert.strictEqual(ok('genLog', { days: 30 }).refills.filter(f => f.time === '14:00').length, 1);
+// misread water row re-entered: 5398 -> 541.65 (misread) -> 5416 : the misread is left out
+addRow({ Date: day(-12), Time: '11:00', Point: 'WATER', AssetID: 'EN-FM-WM-01', WaterM3: 5398 });
+addRow({ Date: day(-10), Time: '11:52', Point: 'WATER', AssetID: 'EN-FM-WM-01', WaterM3: 541.65 });
+addRow({ Date: day(-10), Time: '12:18', Point: 'WATER', AssetID: 'EN-FM-WM-01', WaterM3: 5416 });
+assert.ok(!pt('WATER').alerts.some(a => /backwards/.test(a.title)), 'misread ignored');
+assert.ok(!readingRows_('WATER').some(r => r.values.WaterM3 === 541.65));
+passed += 4;
 // AI put the decimal point in the wrong place on the water meter
 addRow({ Date: day(-1), Time: '09:00', Point: 'WATER', AssetID: 'EN-FM-WM-01', WaterM3: 5398 });
 F.gemini = () => ({ candidates: [{ content: { role: 'model', parts: [{ text: '{"WaterM3": 541.65, "confidence": "high"}' }] } }] });
