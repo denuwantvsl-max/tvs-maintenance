@@ -198,6 +198,24 @@ assert.ok(cd.points[2].rows.every(r => r.at), 'rows carry a timestamp');
 assert.strictEqual(ok('readingsData', { token: tech.token, days: 2 }).days, 7, 'at least 7 days');
 fails('readingsData', {}, /log in/);
 
+// ---- real case 6-9 Nov: fuel-only night reading, generator ran ~16 h, refill not recorded ----
+resetReadings();
+addRow({ Date: day(-13), Time: '11:39', Point: 'GEN', AssetID: 'EN-PS-06', Hours: 1286.75, Starts: 813, FuelPct: 64 });
+addRow({ Date: day(-12), Time: '03:28', Point: 'GEN', AssetID: 'EN-PS-06', FuelPct: 18 });
+addRow({ Date: day(-10), Time: '08:22', Point: 'GEN', AssetID: 'EN-PS-06', Hours: 1302.97, Starts: 816, FuelPct: 49 });
+gen = pt('GEN');
+assert.ok(!gen.alerts.some(a => /fuel fell/.test(a.title)), 'night drop is explained by the 16 h run (hours at 03:28 unknown)');
+assert.ok(gen.alerts.some(a => /refill not recorded: fuel went up from 18% to 49%/.test(a.title)));
+assert.ok(gen.alerts.some(a => /diesel use 4.1 L\/h/.test(a.title) && /refill that was not recorded/.test(a.detail)));
+const glr = ok('genLog', { days: 30 });
+assert.strictEqual(glr.readings.length, 3);
+// AI put the decimal point in the wrong place on the water meter
+addRow({ Date: day(-1), Time: '09:00', Point: 'WATER', AssetID: 'EN-FM-WM-01', WaterM3: 5398 });
+F.gemini = () => ({ candidates: [{ content: { role: 'model', parts: [{ text: '{"WaterM3": 541.65, "confidence": "high"}' }] } }] });
+const fixd = ok('readingAi', { token: tech.token, point: 'WATER', photo: tinyJpeg });
+assert.strictEqual(fixd.values.WaterM3, 5416.5); assert.strictEqual(fixd.confidence, 'low', 'flagged for checking');
+passed += 3;
+
 // ---- generator ran (start / stop) + public generator log ----
 resetReadings();
 addRow({ Date: day(-2), Time: '09:00', Point: 'GEN', AssetID: 'EN-PS-06', Hours: 1400, Starts: 900, FuelPct: 70 });

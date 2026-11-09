@@ -1395,7 +1395,17 @@ function apiReadingAi_(p) {
     if (d.max !== undefined && n > d.max) return;
     values[f] = roundTo_(n, d.dec);
   });
-  return { values: values, confidence: /^(high|medium|low)$/.test(out.confidence) ? out.confidence : 'low', seen: short_(out.seen, 160) };
+  var conf = /^(high|medium|low)$/.test(out.confidence) ? out.confidence : 'low', last = readingRows_(pt.id).filter(function (r) { return r.values[pt.meter] !== undefined; }).pop();
+  pt.fields.forEach(function (f) {
+    var was = last && last.values[f];
+    if (!READING_FIELDS[f].rising || values[f] === undefined || was === undefined || values[f] >= was) return;
+    [10, 100, 1000].some(function (m) {
+      var v = roundTo_(values[f] * m, READING_FIELDS[f].dec);
+      if (v >= was && v <= was * 1.2 + 50) { values[f] = v; conf = 'low'; return true; }
+      return false;
+    });
+  });
+  return { values: values, confidence: conf, seen: short_(out.seen, 160) };
 }
 
 /* ---------------------------------------------------------------- saving */
@@ -1660,13 +1670,16 @@ function pointSummary_(pt, s, now) {
     var tank = Number(s.GEN_TANK_LITRES) || 0, min = Number(s.GEN_LPH_MIN) || 10, max = Number(s.GEN_LPH_MAX) || 45, low = Number(s.GEN_FUEL_LOW_PCT) || 25;
     if (mBase && mBase !== last && last.date >= monthStart) { stats.monthHours = roundTo_(last.values.Hours - mBase.values.Hours, 1); stats.monthFrom = mBase.date;
       if (last.values.Starts !== undefined && mBase.values.Starts !== undefined) stats.monthStarts = last.values.Starts - mBase.values.Starts; }
-    var fuel = all.filter(function (r) { return r.values.FuelPct !== undefined; }), lastFuel = fuel[fuel.length - 1];
-    // hour meter at a reading: its own value, else the latest hour reading taken before it
+    var fuelAll = all.filter(function (r) { return r.values.FuelPct !== undefined; }), lastFuel = fuelAll[fuelAll.length - 1];
+    // hour meter at a reading: its own value; for a fuel-only reading the hour reading before it, but UNKNOWN (null) when the
+    // next hour reading is higher (the generator ran somewhere in between, so we cannot tell how much before this reading)
     var hoursAt = function (r) {
       if (r.values.Hours !== undefined) return r.values.Hours;
-      var h = null; rows.forEach(function (x) { if (x.at.getTime() <= r.at.getTime()) h = x.values.Hours; });
-      return h;
+      var h = null, next = null;
+      rows.forEach(function (x) { if (x.at.getTime() <= r.at.getTime()) h = x.values.Hours; else if (next === null) next = x.values.Hours; });
+      return h !== null && next !== null && next > h + 0.05 ? null : h;
     };
+    var fuel = fuelAll.filter(function (r) { return hoursAt(r) !== null; });   // fuel readings with a known hour meter
     var refills = fuelRows_().filter(function (f) { return !f.exclude; });
     var fedBetween = function (a, b) { return refills.filter(function (f) { return f.date > a.date && f.date <= b.date; }).reduce(function (t, f) { return t + f.litres; }, 0); };
     if (lastFuel) {
@@ -1684,6 +1697,14 @@ function pointSummary_(pt, s, now) {
         var used = (a.values.FuelPct - lastFuel.values.FuelPct) / 100 * tank + fedBetween(a, lastFuel);
         if (used > 0) { stats.lph = roundTo_(used / ran, 1); stats.lphFrom = a.date; stats.lphHours = roundTo_(ran, 1); }
       }
+    }
+    // fuel that went UP with no refill recorded between the two readings
+    if (tank) for (var q = 1; q < fuelAll.length; q++) {
+      var ua = fuelAll[q - 1], ub = fuelAll[q];
+      if (ub.at.getTime() < d30 || ub.values.FuelPct - ua.values.FuelPct < 5 || fedBetween(ua, ub) > 0) continue;
+      alerts.push({ tone: 'warn', notify: ub === lastFuel, title: 'Diesel refill not recorded: fuel went up from ' + ua.values.FuelPct + '% to ' + ub.values.FuelPct + '%',
+        detail: 'Between ' + ua.date + ' ' + ua.time + ' and ' + ub.date + ' ' + ub.time + ' (about ' + Math.round((ub.values.FuelPct - ua.values.FuelPct) / 100 * tank) +
+          ' L or more). Add it under Readings → Diesel refill so the diesel check is right.' });
     }
     // fuel that went down more than the running hours explain (leak, diesel taken, unrecorded run, wrong reading); 5% gauge tolerance
     if (tank) for (var k = 1; k < fuel.length; k++) {
@@ -1703,7 +1724,8 @@ function pointSummary_(pt, s, now) {
       if (span >= 1) stats.lphRefills = roundTo_(usedAll / span, 1);
     }
     var lphNow = stats.lph !== undefined ? stats.lph : stats.lphRefills;
-    if (lphNow !== undefined && (lphNow < min || lphNow > max)) alerts.push({ tone: 'warn', title: 'Generator diesel use ' + lphNow + ' L/h', detail: 'Normal ' + min + '–' + max + ' L/h. Check for a leak, a wrong entry or an unusual load.' });
+    if (lphNow !== undefined && (lphNow < min || lphNow > max)) alerts.push({ tone: 'warn', title: 'Generator diesel use ' + lphNow + ' L/h',
+      detail: 'Normal ' + min + '–' + max + ' L/h. ' + (lphNow < min ? 'Usually a diesel refill that was not recorded – add it under Diesel refill.' : 'Check for a leak, a wrong entry or an unusual load.') });
     stats.lphRange = [min, max];
     stats.lastRefill = refills[refills.length - 1] || null;
   }

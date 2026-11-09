@@ -27,7 +27,9 @@
     var rd = d.readings.map(function (x) { return Object.assign({ t: Date.parse(x.at) }, x); }).sort(function (a, b) { return a.t - b.t; });
     var hoursAt = function (x) {
       if (x.hours !== undefined && x.hours !== null) return x.hours;
-      var h = null; rd.forEach(function (y) { if (y.t <= x.t && y.hours !== undefined && y.hours !== null) h = y.hours; }); return h;
+      var h = null, next = null;
+      rd.forEach(function (y) { if (y.hours === undefined || y.hours === null) return; if (y.t <= x.t) h = y.hours; else if (next === null) next = y.hours; });
+      return h !== null && next !== null && next > h + 0.05 ? null : h;   // ran in between: unknown
     };
     var refills = d.refills.filter(function (f) { return !f.exclude && f.litres > 0 && (!tank || f.litres <= tank); });
     var fedBetween = function (a, b) { return refills.filter(function (f) { return f.date > a.date && f.date <= b.date; }).reduce(function (s, f) { return s + f.litres; }, 0); };
@@ -38,7 +40,7 @@
     withH.forEach(function (x) { if (x.date < r.from) base = x; else if (x.date <= r.to) { endR = x; if (!base) base = x; } });
     var hoursRun = base && endR ? Math.max(0, endR.hours - base.hours) : 0;
     // fuel pairs
-    var fuel = rd.filter(function (x) { return x.fuelPct !== undefined && x.fuelPct !== null; });
+    var fuel = rd.filter(function (x) { return x.fuelPct !== undefined && x.fuelPct !== null && hoursAt(x) !== null; });
     var pairs = [];
     for (var i = 1; i < fuel.length; i++) {
       var a = fuel[i - 1], b = fuel[i];
