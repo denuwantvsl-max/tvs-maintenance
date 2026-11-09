@@ -105,7 +105,15 @@ assert.strictEqual(gen.stats.lph, 18.8);
 assert.ok(!gen.alerts.some(a => /diesel use/.test(a.title)));
 addRow({ Date: day(0), Time: '08:00', Point: 'GEN', AssetID: 'EN-PS-06', Hours: 1311, FuelPct: 20 });
 gen = pt('GEN');
-assert.ok(gen.alerts.some(a => /diesel use .* L\/h/.test(a.title)), 'L/h out of range flagged');
+assert.ok(gen.alerts.some(a => /fuel fell about 176 L/.test(a.title) && /Only 1 h of running/.test(a.detail)), 'fuel drop not explained by running hours');
+// a fuel-only reading (fuel screen photo, no hours): hours taken from the reading before it
+addRow({ Date: day(0), Time: '23:00', Point: 'GEN', AssetID: 'EN-PS-06', FuelPct: 10 });
+gen = pt('GEN');
+assert.strictEqual(gen.last.values.Hours, 1311, 'last hours still shown');
+assert.strictEqual(gen.stats.fuelPct, 10);
+assert.ok(gen.alerts.some(a => /fuel fell about 44 L/.test(a.title) && /No running hours/.test(a.detail)));
+ok('readingSave', { token: tech.token, point: 'GEN', values: { FuelPct: 9 }, photos: [tinyJpeg] });
+fails('readingSave', { token: tech.token, point: 'COMP', values: { Starts: 5 }, photos: [tinyJpeg] }, /Running hours is needed/);
 
 // ---- compressor: loaded share ----
 [[-7, 7180, 1680, 95600], [-3, 7208, 1684, 95950], [0, 7229, 1686, 96246]].forEach(c =>

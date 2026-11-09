@@ -1406,7 +1406,7 @@ function apiReadingSave_(p) {
     if (n === '' || n < 0 || (d.max !== undefined && n > d.max)) throw userError_(d.label + ': not a valid number.');
     values[f] = roundTo_(n, d.dec);
   });
-  if (values[pt.meter] === undefined) throw userError_(READING_FIELDS[pt.meter].label + ' is needed.');
+  if (values[pt.meter] === undefined && !(pt.id === 'GEN' && values.FuelPct !== undefined)) throw userError_(READING_FIELDS[pt.meter].label + ' is needed.');
   var photos = (p.photos || []).filter(String).slice(0, 4);
   if (!photos.length && !note) throw userError_('Take a photo of the meter, or write in the note why there is none.');
 
@@ -1443,7 +1443,7 @@ function apiReadingSave_(p) {
     appendObj_('Readings', row);
 
     var at = readTable_('Assets', true), a = find_(at.rows, 'AssetID', pt.assetId);
-    if (a && (String(a.CurrentMeter) === '' || values[pt.meter] >= Number(a.CurrentMeter) || problems.length)) {
+    if (a && values[pt.meter] !== undefined && (String(a.CurrentMeter) === '' || values[pt.meter] >= Number(a.CurrentMeter) || problems.length)) {
       setCells_(at, a, { CurrentMeter: values[pt.meter], MeterUpdated: now, MeterUnit: a.MeterUnit || READING_FIELDS[pt.meter].unit });
     }
     TABLE_CACHE_ = {};
@@ -1546,15 +1546,17 @@ function readingsSummary_() {
 
 function pointSummary_(pt, s, now) {
   var today = Utilities.formatDate(now, TZ, 'yyyy-MM-dd'), hourNow = Number(Utilities.formatDate(now, TZ, 'H'));
-  var rows = readingRows_(pt.id), last = rows[rows.length - 1] || null, alerts = [], stats = {};
+  // all = every reading (a generator fuel-only reading has no hours); rows = readings that have the main meter value
+  var all = readingRows_(pt.id), rows = all.filter(function (r) { return r.values[pt.meter] !== undefined; });
+  var last = rows[rows.length - 1] || null, lastAny = all[all.length - 1] || null, alerts = [], stats = {};
   var byHour = Number(s.READING_BY_HOUR) || 10;
   var out = { id: pt.id, assetId: pt.assetId, name: pt.name, fields: pt.fields, meter: pt.meter, last: last ? readingOut_(last) : null,
-    doneToday: !!(last && last.date === today), stats: stats, alerts: alerts };
+    doneToday: !!(lastAny && lastAny.date === today), stats: stats, alerts: alerts };
   if (!last) { alerts.push({ tone: 'info', title: pt.name + ': no readings yet', detail: '' }); return out; }
 
-  var days = Math.round((Date.parse(today) - Date.parse(last.date)) / 86400000);
-  if (days >= 2) alerts.push({ tone: 'bad', title: pt.name + ': no reading for ' + days + ' days', detail: 'Last on ' + last.date + (last.by ? ' by ' + last.by : '') });
-  else if (days === 1 && hourNow >= byHour) alerts.push({ tone: 'warn', title: pt.name + ': today\'s reading is missing', detail: 'Due by ' + byHour + ':00. Last on ' + last.date + (last.by ? ' by ' + last.by : '') });
+  var days = Math.round((Date.parse(today) - Date.parse(lastAny.date)) / 86400000);
+  if (days >= 2) alerts.push({ tone: 'bad', title: pt.name + ': no reading for ' + days + ' days', detail: 'Last on ' + lastAny.date + (lastAny.by ? ' by ' + lastAny.by : '') });
+  else if (days === 1 && hourNow >= byHour) alerts.push({ tone: 'warn', title: pt.name + ': today\'s reading is missing', detail: 'Due by ' + byHour + ':00. Last on ' + lastAny.date + (lastAny.by ? ' by ' + lastAny.by : '') });
   var d30 = now.getTime() - 30 * 86400000;
   for (var i = 1; i < rows.length; i++) {
     if (rows[i].at.getTime() < d30) continue;
@@ -1575,7 +1577,15 @@ function pointSummary_(pt, s, now) {
     var tank = Number(s.GEN_TANK_LITRES) || 0, min = Number(s.GEN_LPH_MIN) || 10, max = Number(s.GEN_LPH_MAX) || 45, low = Number(s.GEN_FUEL_LOW_PCT) || 25;
     if (mBase && mBase !== last && last.date >= monthStart) { stats.monthHours = roundTo_(last.values.Hours - mBase.values.Hours, 1); stats.monthFrom = mBase.date;
       if (last.values.Starts !== undefined && mBase.values.Starts !== undefined) stats.monthStarts = last.values.Starts - mBase.values.Starts; }
-    var fuel = rows.filter(function (r) { return r.values.FuelPct !== undefined; }), lastFuel = fuel[fuel.length - 1];
+    var fuel = all.filter(function (r) { return r.values.FuelPct !== undefined; }), lastFuel = fuel[fuel.length - 1];
+    // hour meter at a reading: its own value, else the latest hour reading taken before it
+    var hoursAt = function (r) {
+      if (r.values.Hours !== undefined) return r.values.Hours;
+      var h = null; rows.forEach(function (x) { if (x.at.getTime() <= r.at.getTime()) h = x.values.Hours; });
+      return h;
+    };
+    var refills = fuelRows_().filter(function (f) { return !f.exclude; });
+    var fedBetween = function (a, b) { return refills.filter(function (f) { return f.date > a.date && f.date <= b.date; }).reduce(function (t, f) { return t + f.litres; }, 0); };
     if (lastFuel) {
       stats.fuelPct = lastFuel.values.FuelPct; stats.fuelDate = lastFuel.date;
       if (tank) stats.fuelLitres = Math.round(lastFuel.values.FuelPct / 100 * tank);
@@ -1583,20 +1593,28 @@ function pointSummary_(pt, s, now) {
         title: 'Generator fuel low: ' + lastFuel.values.FuelPct + '%' + (tank ? ' (about ' + stats.fuelLitres + ' L of ' + tank + ' L)' : ''), detail: 'Read on ' + lastFuel.date + '. Plan a diesel refill.' });
     }
     // diesel use from fuel % + refills over the last 30 days of readings (needs >= 2 h of running)
-    var refills = fuelRows_().filter(function (f) { return !f.exclude; });
     if (tank && fuel.length >= 2) {
       var a = null; fuel.forEach(function (r) { if (r.at.getTime() <= lastFuel.at.getTime() - 30 * 86400000) a = r; });
       a = a || fuel[0];
-      var ran = lastFuel.values.Hours - a.values.Hours;
-      if (ran >= 2) {
-        var fed = refills.filter(function (f) { return f.created > a.at.getTime() && f.created <= lastFuel.at.getTime() + 600000; }).reduce(function (t, f) { return t + f.litres; }, 0);
-        var used = (a.values.FuelPct - lastFuel.values.FuelPct) / 100 * tank + fed;
-        stats.lph = roundTo_(used / ran, 1); stats.lphFrom = a.date; stats.lphHours = roundTo_(ran, 1);
+      var ran = hoursAt(lastFuel) - hoursAt(a);
+      if (hoursAt(a) !== null && hoursAt(lastFuel) !== null && ran >= 2) {
+        var used = (a.values.FuelPct - lastFuel.values.FuelPct) / 100 * tank + fedBetween(a, lastFuel);
+        if (used > 0) { stats.lph = roundTo_(used / ran, 1); stats.lphFrom = a.date; stats.lphHours = roundTo_(ran, 1); }
       }
+    }
+    // fuel that went down more than the running hours explain (leak, diesel taken, unrecorded run, wrong reading); 5% gauge tolerance
+    if (tank) for (var k = 1; k < fuel.length; k++) {
+      var fa = fuel[k - 1], fb = fuel[k];
+      if (fb.at.getTime() < d30 || hoursAt(fa) === null || hoursAt(fb) === null) continue;
+      var drop = Math.round((fa.values.FuelPct - fb.values.FuelPct) / 100 * tank + fedBetween(fa, fb)), ranH = Math.max(0, hoursAt(fb) - hoursAt(fa));
+      if (drop >= 20 && drop > ranH * max + 0.05 * tank) alerts.push({ tone: 'bad', notify: fb === lastFuel,
+        title: 'Generator fuel fell about ' + drop + ' L between ' + fa.date + ' ' + fa.time + ' and ' + fb.date + ' ' + fb.time,
+        detail: (ranH ? 'Only ' + roundTo_(ranH, 1) + ' h of running recorded (normal use at most ' + Math.round(ranH * max) + ' L).' : 'No running hours recorded in that time.') +
+          ' Check whether it ran on a power cut (read the hour meter), for a leak, diesel taken, or a wrong reading.' });
     }
     // old records: litres of each refill / hours since the previous refill, only for refills before fuel % was read daily
     var firstPct = fuel[0] ? fuel[0].date : '9999';
-    var counted = refills.filter(function (f) { return f.hours !== null && f.date <= firstPct && f.created <= (fuel[0] ? fuel[0].at.getTime() : Infinity); });
+    var counted = refills.filter(function (f) { return f.hours !== null && f.date <= firstPct; });
     if (counted.length >= 2) {
       var span = counted[counted.length - 1].hours - counted[0].hours, usedAll = counted.slice(1).reduce(function (t, f) { return t + f.litres; }, 0);
       if (span >= 1) stats.lphRefills = roundTo_(usedAll / span, 1);
