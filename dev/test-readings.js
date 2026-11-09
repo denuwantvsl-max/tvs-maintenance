@@ -198,4 +198,28 @@ assert.ok(cd.points[2].rows.every(r => r.at), 'rows carry a timestamp');
 assert.strictEqual(ok('readingsData', { token: tech.token, days: 2 }).days, 7, 'at least 7 days');
 fails('readingsData', {}, /log in/);
 
+// ---- generator ran (start / stop) + public generator log ----
+resetReadings();
+addRow({ Date: day(-2), Time: '09:00', Point: 'GEN', AssetID: 'EN-PS-06', Hours: 1400, Starts: 900, FuelPct: 70 });
+const st = day(-1) + 'T18:10', sp = day(-1) + 'T21:40';
+fails('genRunSave', { token: tech.token, run: { reason: 'Power cut', start: sp, stop: st, hoursStart: 1400, hoursStop: 1403.5 } }, /after the start/);
+fails('genRunSave', { token: tech.token, run: { reason: 'Power cut', start: st, stop: sp, hoursStart: 1400, hoursStop: 1399 } }, /lower/);
+fails('genRunSave', { token: tech.token, run: { reason: 'Power cut', start: st, stop: sp, hoursStart: 1400, hoursStop: 1408 } }, /clock says 3.5 h/);
+fails('genRunSave', { token: tech.token, run: { reason: 'Other', start: st, stop: sp, hoursStart: 1400, hoursStop: 1403.5 } }, /reason in the note/);
+fails('genRunSave', { token: tech.token, run: { reason: 'Power cut', start: st, stop: '2099-01-01T10:00', hoursStart: 1400, hoursStop: 1403.5 } }, /future/);
+fails('genRunSave', { run: { reason: 'Power cut', start: st, stop: sp, hoursStart: 1400, hoursStop: 1403.5 } }, /log in/);
+const run = ok('genRunSave', { token: tech.token, run: { reason: 'Power cut', start: st, stop: sp, hoursStart: '1400', hoursStop: '1403h 30m'.replace('h 30m', '.5'), fuelStart: 70, fuelStop: 57 } });
+assert.strictEqual(run.hours, 3.5); assert.strictEqual(run.clockHours, 3.5);
+const runRow = find_(rowsOf('GenRuns'), 'RunID', run.id);
+assert.strictEqual(runRow.StartAt, day(-1) + ' 18:10'); assert.strictEqual(runRow.By, 'Gayan');
+assert.strictEqual(rowsOf('Readings').filter(r => /Run GR-/.test(r.Note)).length, 2, 'start + stop readings added');
+assert.strictEqual(find_(rowsOf('Assets'), 'AssetID', 'EN-PS-06').CurrentMeter, 1403.5);
+// public log: no token needed, generator only
+const gl = ok('genLog', { days: 30 });
+assert.strictEqual(gl.runs.length, 1); assert.strictEqual(gl.runs[0].reason, 'Power cut');
+assert.ok(gl.readings.length >= 3 && gl.readings.every(r => !('photos' in r)));
+assert.strictEqual(gl.limits.lphExpected, 16);
+assert.ok(!('points' in gl) && !('summary' in gl), 'no other machines on the public log');
+passed += 6;
+
 console.log('All readings tests passed (' + passed + ' checks).');

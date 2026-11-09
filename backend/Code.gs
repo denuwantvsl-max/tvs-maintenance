@@ -42,6 +42,7 @@ var TABLES = {
   Readings: ['ReadingID', 'Date', 'Time', 'Point', 'AssetID', 'Hours', 'LoadedHours', 'Starts', 'FuelPct', 'WaterM3', 'AIRead', 'Corrected',
     'Photos', 'PhotoUntil', 'By', 'Note', 'Created'],
   FuelLog: ['RefillID', 'Date', 'AssetID', 'Litres', 'Hours', 'FuelBefore', 'FuelAfter', 'Photos', 'PhotoUntil', 'By', 'Note', 'Exclude', 'Created'],
+  GenRuns: ['RunID', 'StartAt', 'StopAt', 'Reason', 'HoursStart', 'HoursStop', 'FuelStart', 'FuelStop', 'By', 'Note', 'Created'],
   Settings: ['Key', 'Value', 'Description'],
   Errors: ['Timestamp', 'Action', 'Message', 'Stack']
 };
@@ -56,7 +57,8 @@ var TEXT_COLUMNS = {
   PMRecords: ['RecordID', 'TaskID', 'AssetID', 'TemplateID', 'WO_ID'],
   Expenses: ['ExpenseID', 'BillNo', 'AssetID', 'WO_ID'],
   Readings: ['ReadingID', 'Date', 'Time', 'Point', 'AssetID', 'PhotoUntil'],
-  FuelLog: ['RefillID', 'Date', 'AssetID', 'PhotoUntil']
+  FuelLog: ['RefillID', 'Date', 'AssetID', 'PhotoUntil'],
+  GenRuns: ['RunID', 'StartAt', 'StopAt', 'Reason']
 };
 
 var DEFAULT_SETTINGS = [
@@ -144,6 +146,8 @@ var ROUTES = {
   readingsHome: apiReadingsHome_,
   readingsList: apiReadingsList_,
   readingsData: apiReadingsData_,
+  genRunSave: apiGenRunSave_,
+  genLog: apiGenLog_,
   readingAi: apiReadingAi_,
   readingSave: apiReadingSave_,
   refillSave: apiRefillSave_
@@ -1286,17 +1290,18 @@ var READING_SETTINGS = [
   ['GEN_LPH_MIN', '10', 'Generator diesel use: normal range, lowest litres per running hour'],
   ['GEN_LPH_MAX', '45', 'Generator diesel use: normal range, highest litres per running hour'],
   ['COMP_MIN_LOAD_PCT', '30', 'Alert when the compressor is loaded less than this % of its running time (last 7 days)'],
+  ['GEN_LPH_EXPECTED', '16', 'Generator diesel per running hour used on the public Generator log to show the diesel expected for the hours run'],
   ['WATER_HIGH_FACTOR', '1.5', 'Alert when a day\'s water use is more than this many times the usual daily use']
 ];
 
 /** Creates the Readings / FuelLog tabs, settings rows, the water-meter machine and the known generator history (once). */
 function ensureReadings_() {
   var ss = db_(), props = PropertiesService.getScriptProperties();
-  if (props.getProperty('READINGS_READY') && ss.getSheetByName('Readings') && ss.getSheetByName('FuelLog')) return;
+  if (props.getProperty('READINGS_READY') && ss.getSheetByName('Readings') && ss.getSheetByName('FuelLog') && ss.getSheetByName('GenRuns')) return;
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    ['Readings', 'FuelLog'].forEach(function (name) {
+    ['Readings', 'FuelLog', 'GenRuns'].forEach(function (name) {
       if (ss.getSheetByName(name)) return;
       var sh = ss.insertSheet(name), want = TABLES[name];
       sh.getRange(1, 1, 1, want.length).setValues([want]).setFontWeight('bold').setBackground('#1c2126').setFontColor('#f2b705');
@@ -1484,6 +1489,84 @@ function apiRefillSave_(p) {
       By: u.Name, Note: clean_(d.note, 500), Exclude: '', Created: now });
     return { id: id, date: date, litres: roundTo_(litres, 1), hours: roundTo_(hours, 2) };
   } finally { lock.releaseLock(); }
+}
+
+/* ---------------------------------------------------------------- generator runs (start / stop) + public log */
+
+var GEN_RUN_REASONS = ['Power cut', 'Test run', 'Service', 'Other'];
+
+/** "Generator ran": start / stop time, reason, hour meter and fuel % before and after. Also written to Readings (start + stop),
+ *  so the hour meter, fuel checks and charts include it. */
+function apiGenRunSave_(p) {
+  var u = auth_(p, TEAM_ROLES);
+  ensureReadings_();
+  var r = p.run || {}, s = settings_();
+  var start = parseLocal_(r.start), stop = parseLocal_(r.stop), now = new Date();
+  if (!start || !stop) throw userError_('Type the start and stop date and time.');
+  if (stop <= start) throw userError_('The stop time must be after the start time.');
+  if (stop.getTime() > now.getTime() + 10 * 60000) throw userError_('The stop time cannot be in the future.');
+  var reason = GEN_RUN_REASONS.indexOf(r.reason) >= 0 ? r.reason : 'Other';
+  var h0 = num_(r.hoursStart), h1 = num_(r.hoursStop), f0 = num_(r.fuelStart), f1 = num_(r.fuelStop), note = clean_(r.note, 500);
+  if (h0 === '' || h1 === '') throw userError_('Type the hour meter at start and at stop.');
+  if (h1 < h0) throw userError_('The hour meter at stop is lower than at start.');
+  [f0, f1].forEach(function (x) { if (x !== '' && (x < 0 || x > 100)) throw userError_('Fuel level must be 0–100 %.'); });
+  if (reason === 'Other' && !note) throw userError_('Write the reason in the note.');
+  var clockH = (stop - start) / 3600000, meterH = h1 - h0;
+  if (Math.abs(meterH - clockH) > 0.5 + clockH * 0.2 && !note) {
+    throw userError_('The hour meter moved ' + roundTo_(meterH, 2) + ' h but the clock says ' + roundTo_(clockH, 2) + ' h. Check the times and readings, or write why in the note.');
+  }
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    TABLE_CACHE_ = {};
+    var rows = readTable_('GenRuns').rows.filter(function (x) { return x.RunID; });
+    var id = 'GR-' + ('0000' + (rows.length + 1)).slice(-4);
+    while (find_(rows, 'RunID', id)) id = 'GR-' + ('0000' + (Number(id.slice(3)) + 1)).slice(-4);
+    var fmt = function (d) { return Utilities.formatDate(d, TZ, 'yyyy-MM-dd HH:mm'); };
+    appendObj_('GenRuns', { RunID: id, StartAt: fmt(start), StopAt: fmt(stop), Reason: reason, HoursStart: roundTo_(h0, 2), HoursStop: roundTo_(h1, 2),
+      FuelStart: f0, FuelStop: f1, By: u.Name, Note: note, Created: now });
+    var nr = readTable_('Readings', true).rows.filter(function (x) { return x.ReadingID; }).length;
+    var rid = function () { var x = 'RD-' + ('0000' + (++nr)).slice(-4); while (find_(readTable_('Readings').rows, 'ReadingID', x)) x = 'RD-' + ('0000' + (++nr)).slice(-4); return x; };
+    [[start, h0, f0, 'start'], [stop, h1, f1, 'stop']].forEach(function (x) {
+      var row = { ReadingID: rid(), Date: Utilities.formatDate(x[0], TZ, 'yyyy-MM-dd'), Time: Utilities.formatDate(x[0], TZ, 'HH:mm'), Point: 'GEN', AssetID: 'EN-PS-06',
+        Hours: roundTo_(x[1], 2), FuelPct: x[2], By: u.Name, Note: 'Run ' + id + ' ' + x[3] + ' (' + reason + ')', Created: now };
+      appendObj_('Readings', row);
+    });
+    var at = readTable_('Assets', true), a = find_(at.rows, 'AssetID', 'EN-PS-06');
+    if (a && (String(a.CurrentMeter) === '' || h1 >= Number(a.CurrentMeter))) setCells_(at, a, { CurrentMeter: roundTo_(h1, 2), MeterUpdated: now });
+    TABLE_CACHE_ = {};
+    var gen = pointSummary_(readingPoint_('GEN'), s, now), urgent = gen.alerts.filter(function (x) { return x.notify; });
+    if (urgent.length) notifyRoles_(MANAGER_ROLES, '⚠️ <b>Generator run ' + id + '</b> by ' + esc_(u.Name) + '\n' +
+      urgent.map(function (x) { return '• ' + esc_(x.title) + ' – ' + esc_(x.detail); }).join('\n'), u.UserID);
+    return { id: id, hours: roundTo_(meterH, 2), clockHours: roundTo_(clockH, 2) };
+  } finally { lock.releaseLock(); }
+}
+
+/** PUBLIC (anyone with the link, read only): the generator's hour meter, fuel, runs and refills for the HR / audit page.
+ *  Only generator figures – no photos, no other machines, no PINs. */
+function apiGenLog_(p) {
+  ensureReadings_();
+  var days = Math.max(7, Math.min(400, Number(p.days) || 62)), from = Date.now() - days * 86400000, s = settings_();
+  var all = readingRows_('GEN'), keep = [], prev = null;
+  all.forEach(function (r) { if (r.at.getTime() >= from) keep.push(r); else prev = r; });
+  if (prev) keep.unshift(prev);
+  var fromDay = Utilities.formatDate(new Date(from), TZ, 'yyyy-MM-dd');
+  var runs = readTable_('GenRuns').rows.filter(function (r) { return r.RunID && String(r.StopAt).slice(0, 10) >= fromDay; }).map(function (r) {
+    var t = function (v) { return v instanceof Date ? Utilities.formatDate(v, TZ, 'yyyy-MM-dd HH:mm') : String(v || ''); };
+    return { id: String(r.RunID), start: t(r.StartAt), stop: t(r.StopAt), reason: String(r.Reason || ''), hoursStart: Number(r.HoursStart), hoursStop: Number(r.HoursStop),
+      fuelStart: r.FuelStart === '' ? null : Number(r.FuelStart), fuelStop: r.FuelStop === '' ? null : Number(r.FuelStop), by: String(r.By || ''), note: String(r.Note || '') };
+  });
+  var gen = pointSummary_(readingPoint_('GEN'), s, new Date());
+  return { asset: 'EN-PS-06', name: 'Diesel generator 250 kVA (Greaves Power GPWII-250E)', days: days, from: fromDay,
+    today: Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), now: new Date().toISOString(),
+    readings: keep.map(function (r) { return { date: r.date, time: r.time, at: r.at.toISOString(), hours: r.values.Hours, starts: r.values.Starts, fuelPct: r.values.FuelPct, by: r.by, note: r.note }; }),
+    runs: runs,
+    refills: fuelRows_().filter(function (f) { return f.date >= fromDay; }).map(function (f) {
+      return { date: f.date, litres: f.litres, hours: f.hours, before: f.before, after: f.after, by: f.by, note: f.note, exclude: f.exclude }; }),
+    limits: { tankLitres: Number(s.GEN_TANK_LITRES) || 0, lphMin: Number(s.GEN_LPH_MIN) || 10, lphMax: Number(s.GEN_LPH_MAX) || 45,
+      lphExpected: Number(s.GEN_LPH_EXPECTED) || 16, fuelLowPct: Number(s.GEN_FUEL_LOW_PCT) || 25 },
+    alerts: gen.alerts.filter(function (a) { return a.tone !== 'info'; }).map(function (a) { return { tone: a.tone, title: a.title, detail: a.detail }; }),
+    stats: { fuelPct: gen.stats.fuelPct, fuelLitres: gen.stats.fuelLitres, fuelDate: gen.stats.fuelDate, lph: gen.stats.lph, lphRefills: gen.stats.lphRefills } };
 }
 
 /* ---------------------------------------------------------------- summary, alerts, history */

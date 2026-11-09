@@ -12,56 +12,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css?v=5">
-<style>
-/* chart roles (reference palette, light surface; the CMMS site is light-only) */
-.viz { --surface-1: #ffffff; --text-primary: #0b1220; --text-secondary: #52514e; --text-muted: #64748b;
-  --grid: #eef0f3; --axis: #d5d8de; --series-1: #2a78d6; --series-2: #eb6834; --neutral: #a3a3a3;
-  --good: #15803d; --warn: #d97706; --bad: #dc2626; }
-.viz h2 { margin: 26px 0 4px; font-size: 19px; }
-.viz .sub { color: var(--text-muted); font-size: 13.5px; margin: 0 0 10px; }
-.range { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 4px; }
-.tiles4 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
-@media (min-width: 900px) { .tiles4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-.stat { background: var(--surface-1); border-radius: 14px; box-shadow: var(--shadow); padding: 14px; border: 1px solid rgba(226,232,240,.7); min-width: 0; }
-.stat .k { font-size: 12.5px; color: var(--text-secondary); font-weight: 600; }
-.stat .v { font-size: 26px; font-weight: 800; letter-spacing: -.5px; color: var(--text-primary); line-height: 1.15; margin-top: 4px; }
-.stat .v small { font-size: 14px; font-weight: 600; color: var(--text-secondary); margin-left: 3px; }
-.stat .n { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
-.grid2c { display: grid; gap: 12px; grid-template-columns: 1fr; }
-@media (min-width: 900px) { .grid2c { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .grid2c.wide-left { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); } }
-.panel { background: var(--surface-1); border-radius: 14px; box-shadow: var(--shadow); padding: 14px 14px 10px; border: 1px solid rgba(226,232,240,.7); min-width: 0; }
-.panel h3 { margin: 0 0 2px; font-size: 15px; color: var(--text-primary); }
-.panel .cap { font-size: 12.5px; color: var(--text-muted); margin-bottom: 8px; }
-.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-secondary); margin: 2px 0 6px; }
-.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
-.chart { position: relative; width: 100%; }
-.chart svg { display: block; width: 100%; overflow: visible; }
-.chart text { font: 11px Inter, system-ui, sans-serif; fill: var(--text-muted); }
-.chart .lbl { fill: var(--text-primary); font-weight: 700; paint-order: stroke; stroke: var(--surface-1); stroke-width: 4px; stroke-linejoin: round; }
-.tip { position: absolute; pointer-events: none; background: #0b1220; color: #fff; font-size: 12.5px; line-height: 1.35; padding: 7px 9px;
-  border-radius: 8px; white-space: nowrap; transform: translate(-50%, -100%); margin-top: -8px; opacity: 0; transition: opacity .1s; z-index: 5; }
-.tip b { font-weight: 700; }
-.tank { display: flex; gap: 16px; align-items: center; }
-.tank svg { width: 92px; flex: none; }
-.facts { font-size: 13.5px; color: var(--text-secondary); line-height: 1.55; }
-.facts b { color: var(--text-primary); }
-.duty { display: flex; height: 34px; border-radius: 8px; overflow: hidden; gap: 2px; background: var(--surface-1); margin: 8px 0 6px; }
-.duty div { display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12.5px; font-weight: 700; min-width: 0; white-space: nowrap; overflow: hidden; }
-.band { position: relative; height: 12px; border-radius: 6px; background: var(--grid); margin: 20px 0 22px; }
-.band .ok { position: absolute; top: 0; bottom: 0; background: #d1fae5; border-radius: 6px; }
-.band .pin { position: absolute; top: -6px; width: 4px; height: 24px; border-radius: 2px; background: var(--text-primary); transform: translateX(-2px); }
-.band .pl { position: absolute; top: -22px; transform: translateX(-50%); font-size: 12px; font-weight: 700; color: var(--text-primary); white-space: nowrap; }
-.band .tk { position: absolute; top: 16px; transform: translateX(-50%); font-size: 11px; color: var(--text-muted); }
-table.var { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-table.var th, table.var td { padding: 8px 6px; border-bottom: 1px solid #f1f5f9; text-align: right; white-space: nowrap; }
-table.var th:first-child, table.var td:first-child { text-align: left; }
-table.var th { color: var(--text-muted); font-weight: 600; font-size: 12.5px; }
-.flag { display: inline-flex; gap: 6px; align-items: flex-start; font-size: 13.5px; padding: 8px 10px; border-radius: 10px; margin: 4px 0; width: 100%; }
-.flag.warn { background: #fffbeb; color: #7c2d12; } .flag.bad { background: #fef2f2; color: #7f1d1d; } .flag.good { background: #f0fdf4; color: #14532d; }
-details.tbl summary { cursor: pointer; font-weight: 600; color: var(--brand); margin: 18px 0 8px; }
-.scroll-x { overflow-x: auto; }
-.empty-note { color: var(--text-muted); font-size: 13.5px; padding: 18px 4px; text-align: center; }
-</style>
+<link rel="stylesheet" href="viz.css?v=1">
 </head>
 <body>
 <header class="top no-print">
@@ -83,6 +34,7 @@ details.tbl summary { cursor: pointer; font-weight: 600; color: var(--brand); ma
 
 <script src="config.js?v=2"></script>
 <script src="common.js?v=4"></script>
-<script src="insights.js?v=2"></script>
+<script src="viz.js?v=1"></script>
+<script src="insights.js?v=3"></script>
 </body>
 </html>

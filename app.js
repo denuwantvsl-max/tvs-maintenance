@@ -312,6 +312,7 @@
     var rd = /^reading=(.+)$/.exec(h);
     if (rd) { showTab('readings'); openReading(decodeURIComponent(rd[1]).toUpperCase()); return; }
     if (h === 'refill') { showTab('readings'); openRefill(); return; }
+    if (h === 'genrun') { showTab('readings'); openGenRun(); return; }
     var m = /^wo=(.+)$/.exec(h), a = /^asset=(.*)$/.exec(h), pm = /^pm=(.*)$/.exec(h), rec = /^rec=(.+)$/.exec(h), pe = /^pmedit=(.*)$/.exec(h), bl = /^bill=(.*)$/.exec(h);
     if (m) openJob(decodeURIComponent(m[1]));
     else if (a) openAsset(decodeURIComponent(a[1]));
@@ -1023,6 +1024,23 @@
     rdTake: ['Take reading', 'කියවීම ගන්න'],
     rdRefill: ['⛽ Diesel refill', '⛽ ඩීසල් පිරවීම'],
     rdCharts: ['Charts', 'ප්‍රස්ථාර'],
+    rdRan: ['⚡ Generator ran', '⚡ ජනකය ධාවනය විය'],
+    rdRanTitle: ['Generator ran', 'ජනකය ධාවනය විය'],
+    rdRanLead: ['Record every run: power cut, test run or service. Read the hour meter and fuel level when it starts and when it stops.',
+      'සෑම ධාවනයක්ම සටහන් කරන්න: විදුලිය නැතිවීම, පරීක්ෂණ ධාවනය හෝ සේවාව. ආරම්භයේදී සහ නැවතුණු විට පැය මීටරය සහ ඉන්ධන මට්ටම කියවන්න.'],
+    rdReason: ['Reason', 'හේතුව'],
+    rs_power: ['Power cut', 'විදුලිය නැතිවීම'],
+    rs_test: ['Test run', 'පරීක්ෂණ ධාවනය'],
+    rs_service: ['Service', 'සේවාව'],
+    rs_other: ['Other (write in note)', 'වෙනත් (සටහනේ ලියන්න)'],
+    rdStarted: ['Started', 'ආරම්භ විය'],
+    rdStopped: ['Stopped', 'නැවතුණි'],
+    rdHStart: ['Hour meter at start', 'ආරම්භයේ පැය මීටරය'],
+    rdHStop: ['Hour meter at stop', 'නැවතුණු විට පැය මීටරය'],
+    rdFStart: ['Fuel % at start', 'ආරම්භයේ ඉන්ධන %'],
+    rdFStop: ['Fuel % at stop', 'නැවතුණු විට ඉන්ධන %'],
+    rdRanSaved: ['Run saved: {h} h', 'ධාවනය සුරකින ලදී: පැය {h}'],
+    rdHrLog: ['Generator log (HR)', 'ජනක ලොගය (HR)'],
     rdLast: ['Last', 'අවසන්'],
     rdNone: ['No readings yet.', 'තවම කියවීම් නැත.'],
     rdPhotos: ['Photos of the meter', 'මීටරයේ ඡායාරූප'],
@@ -1086,7 +1104,8 @@
       var tone = { bad: 'err', warn: 'info', info: 'info' };
       var h = '<h1 style="margin:4px 0 4px">' + esc(t('rdTitle')) + '</h1><p class="lead">' + esc(t('rdLead').replace('{h}', d.byHour)) + '</p>' +
         '<div class="toolbar"><b style="flex:1">' + esc(t('rdDoneOf').replace('{n}', d.doneToday).replace('{t}', d.points.length)) + '</b>' +
-        '<a class="btn sm ghost" href="insights.html">📈 ' + esc(t('rdCharts')) + '</a><a class="btn sm ghost" href="#refill">' + esc(t('rdRefill')) + '</a></div>';
+        '<a class="btn sm ghost" href="insights.html">📈 ' + esc(t('rdCharts')) + '</a><a class="btn sm ghost" href="#refill">' + esc(t('rdRefill')) + '</a></div>' +
+        '<div class="toolbar" style="margin-top:-4px"><a class="btn sm" href="#genrun">' + esc(t('rdRan')) + '</a><a class="btn sm ghost" href="generator-log.html" target="_blank" rel="noopener">' + esc(t('rdHrLog')) + '</a></div>';
       var real = d.alerts.filter(function (a) { return a.tone !== 'info'; });
       if (real.length) h += '<div class="card flat"><h3 style="margin-top:0">' + esc(t('rdAlerts')) + '</h3>' + real.map(function (a) {
         return '<div class="msg ' + tone[a.tone] + '" style="margin:8px 0"><b>' + esc(a.title) + '</b>' + (a.detail ? '<div class="small">' + esc(a.detail) + '</div>' : '') + '</div>';
@@ -1185,6 +1204,33 @@
       });
     };
     if (S.rd) go(); else { openSheet(t('rdTitle'), C.loadingHtml()); C.api('readingsHome').then(function (d) { S.rd = d; go(); }).catch(function (e) { handleErr(e); }); }
+  }
+
+  function openGenRun() {
+    var gen = S.rd && S.rd.points.filter(function (x) { return x.id === 'GEN'; })[0];
+    var lastH = gen && gen.last ? gen.last.values.Hours : '';
+    var now = C.toLocalInput(new Date().toISOString());
+    var reasons = [['Power cut', 'rs_power'], ['Test run', 'rs_test'], ['Service', 'rs_service'], ['Other', 'rs_other']];
+    openSheet(t('rdRanTitle'), '<div class="card"><p class="hint" style="margin-top:0">' + esc(t('rdRanLead')) + '</p>' +
+      field('gr_reason', t('rdReason') + ' *', '<select id="gr_reason">' + reasons.map(function (r) { return '<option value="' + r[0] + '">' + esc(t(r[1])) + '</option>'; }).join('') + '</select>') +
+      '<div class="grid2"><div>' + field('gr_start', t('rdStarted') + ' *', '<input type="datetime-local" id="gr_start" max="' + esc(now) + '">') + '</div><div>' +
+      field('gr_stop', t('rdStopped') + ' *', '<input type="datetime-local" id="gr_stop" value="' + esc(now) + '" max="' + esc(now) + '">') + '</div></div>' +
+      '<div class="grid2"><div>' + field('gr_h0', t('rdHStart') + ' *', '<input type="text" inputmode="decimal" id="gr_h0" class="rd-num" autocomplete="off" value="' + esc(lastH) + '">') + '</div><div>' +
+      field('gr_h1', t('rdHStop') + ' *', '<input type="text" inputmode="decimal" id="gr_h1" class="rd-num" autocomplete="off">') + '</div></div>' +
+      '<div class="hint">' + esc(t('rdHmHint')) + '</div>' +
+      '<div class="grid2"><div>' + field('gr_f0', t('rdFStart'), '<input type="text" inputmode="numeric" id="gr_f0" class="rd-num">') + '</div><div>' +
+      field('gr_f1', t('rdFStop'), '<input type="text" inputmode="numeric" id="gr_f1" class="rd-num">') + '</div></div>' +
+      field('gr_note', t('note') + ' ' + t('optional'), '<textarea id="gr_note" maxlength="500" style="min-height:64px"></textarea>') +
+      '<div id="grErr" class="hidden"></div><div class="btn-row"><button class="btn dark" id="grSave" type="button">' + esc(t('save')) + '</button></div></div>');
+    $('grSave').addEventListener('click', function () {
+      $('grSave').disabled = true;
+      C.api('genRunSave', { run: { reason: $('gr_reason').value, start: $('gr_start').value, stop: $('gr_stop').value, hoursStart: parseHours($('gr_h0').value),
+        hoursStop: parseHours($('gr_h1').value), fuelStart: $('gr_f0').value.trim(), fuelStop: $('gr_f1').value.trim(), note: $('gr_note').value.trim() } }).then(function (r) {
+        if (location.hash) history.pushState(null, '', location.pathname + location.search);
+        closeSheet(); showTab('readings');
+        loadReadings().then(function () { $('tab-readings').insertAdjacentHTML('afterbegin', '<div class="msg ok">' + esc(t('rdRanSaved').replace('{h}', r.hours)) + '</div>'); });
+      }).catch(function (e) { handleErr(e, $('grErr')); $('grSave').disabled = false; });
+    });
   }
 
   function openRefill() {

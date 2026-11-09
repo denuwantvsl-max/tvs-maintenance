@@ -61,6 +61,12 @@
     for (var d = -30; d <= -1; d++) {
       var date = day(d), sunday = new Date(Date.now() + d * 86400000).getDay() === 0;
       var run = (d % 7 === 0) ? 0.3 : (rnd() < .12 ? 1.5 + rnd() * 3 : 0);
+      if (run > 1) {
+        var sh = 17 + Math.floor(rnd() * 3), sm = Math.floor(rnd() * 50), mins = Math.round(run * 60), stopM = sh * 60 + sm + mins, pad = function (n) { return ('0' + n).slice(-2); };
+        appendObj_('GenRuns', { RunID: 'GR-' + ('0000' + n).slice(-4), StartAt: date + ' ' + pad(sh) + ':' + pad(sm), StopAt: date + ' ' + pad(Math.floor(stopM / 60) % 24) + ':' + pad(stopM % 60),
+          Reason: 'Power cut', HoursStart: Math.round(gen.h * 100) / 100, HoursStop: Math.round((gen.h + run) * 100) / 100, FuelStart: Math.round(gen.fuel),
+          FuelStop: Math.round(gen.fuel - run * 16.5 / 440 * 100), By: 'Gayan', Created: new Date() });
+      }
       if (run) { gen.h += run; gen.st += 1 + (run > 1 && rnd() < .3 ? 1 : 0); gen.fuel -= run * 16.5 / 440 * 100; }
       if (gen.fuel < 26) { appendObj_('FuelLog', { RefillID: 'FL-9' + n, Date: date, AssetID: 'EN-PS-06', Litres: 200, Hours: Math.round(gen.h * 100) / 100, FuelBefore: Math.round(gen.fuel), FuelAfter: Math.round(gen.fuel + 45), By: 'Gayan', Created: new Date(Date.now() + d * 86400000) }); gen.fuel += 45; }
       add({ Date: date, Point: 'GEN', AssetID: 'EN-PS-06', Hours: Math.round(gen.h * 100) / 100, Starts: gen.st, FuelPct: Math.round(gen.fuel) });
