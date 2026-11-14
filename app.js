@@ -152,6 +152,7 @@
     pmForMachine: ['PM tasks', 'නඩත්තු කාර්ය'],
     addPmTask: ['+ PM task', '+ නඩත්තු කාර්යය'],
     machinePhoto: ['Machine photo', 'යන්ත්‍රයේ ඡායාරූපය'],
+    savePhoto: ['Save photo', 'ඡායාරූපය සුරකින්න'],
     removeMachine: ['Remove machine', 'යන්ත්‍රය ඉවත් කරන්න'],
     removeHint: ['Machines with job or PM history are kept as "Disposed" (history stays). Others are deleted.',
       'රැකියා හෝ නඩත්තු ඉතිහාසයක් ඇති යන්ත්‍ර "ඉවත් කළ" ලෙස තබා ගනී. අනෙක් ඒවා මකා දමයි.'],
@@ -526,6 +527,7 @@
       var a = id ? S.assets.filter(function (x) { return x.AssetID === id; })[0] : {};
       if (id && !a) { openSheet(id, '<div class="msg err">Not found</div>'); return; }
       var editable = isMgr(), h = '', photo = '', removePhoto = false;
+      var photoOnly = !editable && !!id && S.user && S.user.role === 'technician'; // technicians may add / replace the photo only
       if (id) {
         h += '<div class="btn-row"><a class="btn ghost sm" href="asset.html?id=' + encodeURIComponent(id) + '" target="_blank" rel="noopener">' + esc(t('publicPage')) + ' ↗</a>' +
           '<a class="btn ghost sm" href="request.html?asset=' + encodeURIComponent(id) + '">' + esc(t('reportThis')) + '</a>' +
@@ -535,8 +537,10 @@
       h += '<div class="card"><label class="f">' + esc(t('machinePhoto')) + '</label><div class="photo-pick asset-photo">' +
         '<img id="asPhotoPrev" class="' + (a.photoUrl ? '' : 'hidden') + '" src="' + esc(a.photoUrl || '') + '" alt="">' +
         (editable ? '<label class="btn ghost sm" for="asPhoto">' + esc(t('addPhoto')) + '</label><input type="file" id="asPhoto" accept="image/*" capture="environment" class="hidden">' +
-          '<button type="button" class="btn ghost sm' + (a.photoUrl ? '' : ' hidden') + '" id="asPhotoDel">' + esc(t('removePhoto')) + '</button>' : (a.photoUrl ? '' : '<span class="muted">—</span>')) +
-        '</div></div>';
+          '<button type="button" class="btn ghost sm' + (a.photoUrl ? '' : ' hidden') + '" id="asPhotoDel">' + esc(t('removePhoto')) + '</button>' :
+          photoOnly ? '<label class="btn ghost sm" for="asPhoto">' + esc(t('addPhoto')) + '</label><input type="file" id="asPhoto" accept="image/*" capture="environment" class="hidden">' +
+          '<button type="button" class="btn dark sm hidden" id="asPhotoSave">' + esc(t('savePhoto')) + '</button>' : (a.photoUrl ? '' : '<span class="muted">—</span>')) +
+        '</div><div id="asPhotoErr" class="hidden"></div></div>';
       h += '<div class="card">' + ASSET_FIELDS.map(function (f) {
         var key = f[0], val = a[key] === undefined ? '' : a[key], dis = (!editable || (key === 'AssetID' && id)) ? ' disabled' : '';
         if (key === 'CertExpiry') val = C.toLocalInput(val, true);
@@ -562,8 +566,17 @@
       if ($('asPhoto')) $('asPhoto').addEventListener('change', function () {
         var f = $('asPhoto').files[0]; if (!f) return;
         C.shrinkPhoto(f, 1280).then(function (d) {
-          photo = d; removePhoto = false; $('asPhotoPrev').src = d; $('asPhotoPrev').classList.remove('hidden'); $('asPhotoDel').classList.remove('hidden');
+          photo = d; removePhoto = false; $('asPhotoPrev').src = d; $('asPhotoPrev').classList.remove('hidden');
+          if ($('asPhotoDel')) $('asPhotoDel').classList.remove('hidden');
+          if ($('asPhotoSave')) $('asPhotoSave').classList.remove('hidden');
         });
+      });
+      if ($('asPhotoSave')) $('asPhotoSave').addEventListener('click', function () {
+        if (!photo) return;
+        $('asPhotoSave').disabled = true;
+        C.api('assetPhoto', { id: id, photo: photo }).then(function () {
+          return loadAssets(true).then(function () { S.flash = t('saved'); openAsset(id); });
+        }).catch(function (e) { handleErr(e, $('asPhotoErr')); $('asPhotoSave').disabled = false; });
       });
       if ($('asPhotoDel')) $('asPhotoDel').addEventListener('click', function () {
         photo = ''; removePhoto = true; $('asPhotoPrev').classList.add('hidden'); $('asPhotoDel').classList.add('hidden');

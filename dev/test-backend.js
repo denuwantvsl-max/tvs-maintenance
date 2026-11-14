@@ -197,6 +197,16 @@ assert.strictEqual(fh.CertFileId, '1QhUBlRyhgaNKp5wlzFB8VK-flLr0nJly');
 assert.ok(fh.CertExpiry instanceof Date);
 ok('assetSave', { token: sup.token, asset: { AssetID: 'EN-FH-01', Name: 'Electric fire pump 01', Make: 'Solex' } });
 assert.strictEqual(find_(rowsOf('Assets'), 'AssetID', 'EN-FH-01').Make, 'Solex');
+// technician: machine photo yes, other fields no
+const png = 'data:image/png;base64,iVBORw0KGgo=';
+ok('assetPhoto', { token: tech.token, id: 'en-fh-01', photo: png });
+const fhp = find_(rowsOf('Assets'), 'AssetID', 'EN-FH-01');
+assert.ok(fhp.Photo, 'technician photo saved');
+assert.strictEqual(fhp.Make, 'Solex', 'other fields untouched');
+fails('assetPhoto', { token: tech.token, id: 'NOPE-1', photo: png }, /not found/);
+fails('assetPhoto', { token: tech.token, id: 'EN-FH-01' }, /photo/);
+fails('assetPhoto', { id: 'EN-FH-01', photo: png }, /log in|session|token/i);
+passed += 5;
 const list = ok('assetsList', { token: tech.token });
 assert.ok(list.find(a => a.AssetID === 'EN-CA-01').openJobs === 0);
 

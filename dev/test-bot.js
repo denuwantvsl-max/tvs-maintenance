@@ -174,6 +174,15 @@ script = [[['save_machine', { id: 'EN-NEW-01', is_new: true, name: 'Water pump 2
 say(222, 'add'); assert.strictEqual(find_(rowsOf('Assets'), 'AssetID', 'EN-NEW-01').Name, 'Water pump 2');
 script = [[['remove_machine', { id: 'EN-NEW-01' }]], 'no'];
 say(333, 'remove it'); assert.match(lastToolResults()[0].error, /permission/);
+// technician (Gayan, chat 333): machine photo allowed, other machine edits not
+script = ['Which machine?'];
+say(333, '', { photo: [{ file_id: 'g1' }] });
+script = [[['save_machine', { id: 'EN-NEW-01', use_last_photo: true }]], 'Photo set.'];
+say(333, 'EN-NEW-01 photo');
+assert.ok(/^FAKEFILE/.test(find_(rowsOf('Assets'), 'AssetID', 'EN-NEW-01').Photo), 'technician set the photo');
+script = [[['save_machine', { id: 'EN-NEW-01', location: 'Roof', use_last_photo: true }]], 'no'];
+say(333, 'EN-NEW-01 photo, location roof'); assert.match(lastToolResults()[0].error, /permission/);
+passed += 2;
 script = [[['find_machines', { query: 'forklift' }], ['cost_report', { from: today.slice(0, 8) + '01' }]], 'Report.'];
 say(111, 'forklift and costs');
 const rr = lastToolResults();

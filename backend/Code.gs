@@ -127,6 +127,7 @@ var ROUTES = {
   jobAction: apiJobAction_,
   assetsList: apiAssetsList_,
   assetSave: apiAssetSave_,
+  assetPhoto: apiAssetPhoto_,
   dashboard: apiDashboard_,
   users: apiUsers_,
   telegramLinkStart: apiTelegramLinkStart_,
@@ -675,6 +676,29 @@ function apiAssetsList_(p) {
     o.photoUrl = a.Photo ? 'https://drive.google.com/thumbnail?id=' + a.Photo + '&sz=w300' : '';
     return o;
   });
+}
+
+/** Machine photo only – the whole team (technicians too) may add or replace it; other machine fields stay manager-only. */
+function apiAssetPhoto_(p) {
+  var u = auth_(p, TEAM_ROLES);
+  if (!p.photo) throw userError_('Please take or choose a photo.');
+  var id = cleanId_(p.id);
+  if (!find_(readTable_('Assets').rows, 'AssetID', id)) throw userError_('Machine not found: ' + id);
+  setAssetPhoto_(id, savePhoto_(p.photo, 'ASSET_' + id));
+  return { id: id, savedBy: u.Name };
+}
+
+function setAssetPhoto_(id, fileId) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var t = readTable_('Assets', true);
+    var a = find_(t.rows, 'AssetID', id);
+    if (!a) throw userError_('Machine not found: ' + id);
+    setCells_(t, a, { Photo: fileId, Updated: new Date() });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function apiAssetSave_(p) {
@@ -2102,7 +2126,7 @@ var BOT_TOOLS = [
     category: { type: 'STRING' }, production_stopped: { type: 'BOOLEAN' } }, required: ['description', 'priority'] } },
   { name: 'find_machines', description: 'Search machines / assets / tools by ID, name, area or location.', parameters: { type: 'OBJECT', properties: { query: { type: 'STRING' } }, required: ['query'] } },
   { name: 'get_machine', description: 'Details of one machine: specs, certificate, meter, PM tasks, recent jobs.', parameters: { type: 'OBJECT', properties: { id: { type: 'STRING' } }, required: ['id'] } },
-  { name: 'save_machine', description: 'Add a new machine (is_new=true) or change fields of an existing one. Only given fields change. Admin / supervisor only.',
+  { name: 'save_machine', description: 'Add a new machine (is_new=true) or change fields of an existing one. Only given fields change. Admin / supervisor only, except that technicians may set the machine photo (use_last_photo alone).',
     parameters: { type: 'OBJECT', properties: {
       id: { type: 'STRING' }, is_new: { type: 'BOOLEAN' }, name: { type: 'STRING' }, area: { type: 'STRING' }, location: { type: 'STRING' },
       category: { type: 'STRING' }, parent_id: { type: 'STRING' }, make: { type: 'STRING' }, model: { type: 'STRING' }, serial_no: { type: 'STRING' },
@@ -2391,10 +2415,11 @@ function runBotTool_(name, a, ctx) {
       Object.keys(map).forEach(function (k) { if (a[k] !== undefined && a[k] !== null) { asset[map[k]] = String(a[k]); changed.push(map[k]); } });
       if (a.specs_add) { asset.Specs = mergeSpecs_(asset.Specs, a.specs_add); if (changed.indexOf('Specs') < 0) changed.push('Specs'); }
       if (a.use_last_photo && !(ctx.file && ctx.file.kind === 'photo')) throw userError_('Please send the machine photo first.');
-      var sv = apiAssetSave_({ token: tok, asset: asset, isNew: !row });
+      // technicians may set the machine photo only; anything else needs the admin or supervisor (apiAssetSave_ checks)
+      var photoOnly = row && a.use_last_photo && !changed.length && !isManager_(u);
+      var sv = photoOnly ? { id: id } : apiAssetSave_({ token: tok, asset: asset, isNew: !row });
       if (a.use_last_photo) {
-        var at = readTable_('Assets', true);
-        setCells_(at, find_(at.rows, 'AssetID', id), { Photo: ctx.file.id, Updated: new Date() });
+        setAssetPhoto_(id, ctx.file.id);
         changed.push('Photo');
       }
       return { id: sv.id, added: !row, changed: changed, specs: asset.Specs || '' };
