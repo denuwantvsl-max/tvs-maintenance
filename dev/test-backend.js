@@ -207,6 +207,21 @@ fails('assetPhoto', { token: tech.token, id: 'NOPE-1', photo: png }, /not found/
 fails('assetPhoto', { token: tech.token, id: 'EN-FH-01' }, /photo/);
 fails('assetPhoto', { id: 'EN-FH-01', photo: png }, /log in|session|token/i);
 passed += 5;
+// service agreement (AMC): saved by a manager, staff see it, the public QR page does not
+fails('assetSave', { token: sup.token, asset: { AssetID: 'EN-FH-01', Name: 'Electric fire pump 01', AgreementFrom: '2026-09-01', AgreementUntil: '2026-01-01' } }, /end date is before/);
+ok('assetSave', { token: sup.token, asset: { AssetID: 'EN-FH-01', Name: 'Electric fire pump 01', AgreementFileId: 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view',
+  AgreementFrom: '2026-09-01', AgreementUntil: '2027-08-31' } });
+const fha = find_(rowsOf('Assets'), 'AssetID', 'EN-FH-01');
+assert.strictEqual(fha.AgreementFileId, '1AbCdEfGhIjKlMnOpQrStUvWxYz012345');
+assert.ok(fha.AgreementUntil instanceof Date);
+assert.ok(!('agreementUrl' in ok('assetPublic', { id: 'EN-FH-01' })), 'public page has no agreement');
+assert.match(ok('assetPublic', { id: 'EN-FH-01', token: tech.token }).staff.agreementUrl, /1AbCdEfGhIjKlMnOpQrStUvWxYz012345/);
+// expiry reminder: 30 days before the end, once
+setCells_(readTable_('Assets', true), find_(rowsOf('Assets'), 'AssetID', 'EN-FH-01'), { AgreementUntil: new Date(Date.now() + 25 * 86400000) });
+const agr1 = certAlerts_(rowsOf('Assets'), settings_(), 'AgreementUntil');
+assert.ok(agr1.some(l => /EN-FH-01/.test(l)), 'agreement alert');
+assert.strictEqual(certAlerts_(rowsOf('Assets'), settings_(), 'AgreementUntil').length, 0, 'only once');
+passed += 7;
 const list = ok('assetsList', { token: tech.token });
 assert.ok(list.find(a => a.AssetID === 'EN-CA-01').openJobs === 0);
 

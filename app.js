@@ -153,6 +153,7 @@
     addPmTask: ['+ PM task', '+ නඩත්තු කාර්යය'],
     machinePhoto: ['Machine photo', 'යන්ත්‍රයේ ඡායාරූපය'],
     savePhoto: ['Save photo', 'ඡායාරූපය සුරකින්න'],
+    agreement: ['Service agreement (AMC)', 'සේවා ගිවිසුම (AMC)'],
     removeMachine: ['Remove machine', 'යන්ත්‍රය ඉවත් කරන්න'],
     removeHint: ['Machines with job or PM history are kept as "Disposed" (history stays). Others are deleted.',
       'රැකියා හෝ නඩත්තු ඉතිහාසයක් ඇති යන්ත්‍ර "ඉවත් කළ" ලෙස තබා ගනී. අනෙක් ඒවා මකා දමයි.'],
@@ -519,6 +520,7 @@
     ['Status', 'Status', ['Active', 'Out of service', 'Disposed']], ['MaintainedBy', 'Maintained by'], ['PMFrequency', 'PM frequency'],
     ['ChecklistRef', 'Checklist ref. (e.g. TVS/QMS/CL/29)'], ['CertRequired', 'Statutory certificate required?', ['', 'Yes', 'No']],
     ['CertExpiry', 'Certificate valid until', 'date'], ['CertFileId', 'Certificate PDF (Google Drive link)'],
+    ['AgreementFileId', 'Service agreement / AMC PDF (Google Drive link)'], ['AgreementFrom', 'Agreement from', 'date'], ['AgreementUntil', 'Agreement valid until', 'date'],
     ['MeterUnit', 'Hour meter? (h = hours)', ['', 'h', 'km']], ['CurrentMeter', 'Current meter reading'], ['Notes', 'Notes', 'area']
   ];
 
@@ -543,8 +545,8 @@
         '</div><div id="asPhotoErr" class="hidden"></div></div>';
       h += '<div class="card">' + ASSET_FIELDS.map(function (f) {
         var key = f[0], val = a[key] === undefined ? '' : a[key], dis = (!editable || (key === 'AssetID' && id)) ? ' disabled' : '';
-        if (key === 'CertExpiry') val = C.toLocalInput(val, true);
-        if (key === 'CertFileId' && val) val = 'https://drive.google.com/file/d/' + val + '/view';
+        if (f[2] === 'date') val = C.toLocalInput(val, true);
+        if ((key === 'CertFileId' || key === 'AgreementFileId') && val) val = 'https://drive.google.com/file/d/' + val + '/view';
         var input;
         if (f[2] === 'area') input = '<textarea id="as_' + key + '"' + dis + '>' + esc(val) + '</textarea>';
         else if (f[2] === 'date') input = '<input type="date" id="as_' + key + '" value="' + esc(val) + '"' + dis + '>';
@@ -553,6 +555,8 @@
         return field('as_' + key, f[1], input);
       }).join('') + (editable ? '<div id="asErr" class="hidden"></div><div style="margin-top:16px"><button class="btn dark" id="asSave" type="button">' + esc(t('save')) + '</button></div>' : '') + '</div>';
       if (id && a.CertFileId) h += '<p><a href="https://drive.google.com/file/d/' + esc(a.CertFileId) + '/view" target="_blank" rel="noopener">📄 ' + esc(t('certificate')) + '</a></p>';
+      if (id && a.AgreementFileId) h += '<p><a href="https://drive.google.com/file/d/' + esc(a.AgreementFileId) + '/view" target="_blank" rel="noopener">📑 ' + esc(t('agreement')) + '</a>' +
+        (a.AgreementUntil ? ' <span class="muted small">(' + esc(t('validUntil')) + ' ' + esc(C.fmtDate(a.AgreementUntil, false)) + ')</span>' : '') + '</p>';
       if (id && editable && a.Status !== 'Disposed') {
         h += '<div class="card danger-zone"><h3 style="margin-top:0">' + esc(t('removeMachine')) + '</h3><p class="muted small">' + esc(t('removeHint')) + '</p>' +
           '<div id="rmErr" class="hidden"></div><button class="btn ghost sm danger" id="asRemove" type="button">' + esc(t('removeMachine')) + '</button></div>';

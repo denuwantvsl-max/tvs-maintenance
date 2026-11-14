@@ -20,7 +20,8 @@ var OLD_REQUESTS_SHEET_ID = '1RurjIrWvBDDJYh613ZRUf1kouJISIiU8t7kBObyNL_U'; // o
 var TABLES = {
   Assets: ['AssetID', 'Name', 'Area', 'Location', 'Category', 'ParentID', 'Make', 'Model', 'SerialNo', 'Year',
     'Specs', 'Criticality', 'Status', 'MaintainedBy', 'PMFrequency', 'ChecklistRef', 'CertRequired', 'CertExpiry',
-    'CertFileId', 'Notes', 'Created', 'Updated', 'Photo', 'MeterUnit', 'CurrentMeter', 'MeterUpdated'],
+    'CertFileId', 'Notes', 'Created', 'Updated', 'Photo', 'MeterUnit', 'CurrentMeter', 'MeterUpdated',
+    'AgreementFileId', 'AgreementFrom', 'AgreementUntil'],
   WorkOrders: ['WO_ID', 'Created', 'RequesterName', 'RequesterEmail', 'RequesterPhone', 'Department', 'Location',
     'AssetID', 'AssetName', 'Category', 'Priority', 'Description', 'ProductionStopped', 'RequestPhoto', 'Status',
     'DueAt', 'ApprovedBy', 'ApprovedAt', 'AssignedTo', 'AssignedAt', 'StartedAt', 'CompletedAt', 'ClosedAt',
@@ -49,7 +50,7 @@ var TABLES = {
 
 // Columns kept as plain text (leading zeros, IDs, phone numbers, PINs)
 var TEXT_COLUMNS = {
-  Assets: ['AssetID', 'ParentID', 'SerialNo', 'Year', 'CertFileId'],
+  Assets: ['AssetID', 'ParentID', 'SerialNo', 'Year', 'CertFileId', 'AgreementFileId'],
   WorkOrders: ['WO_ID', 'RequesterPhone', 'AssetID', 'ConfirmKey', 'OldJobID'],
   Users: ['UserID', 'Phone', 'NewPIN', 'PinHash', 'TelegramChatID', 'TelegramLinkCode'],
   ChecklistItems: ['TemplateID', 'ItemNo'],
@@ -74,6 +75,8 @@ var DEFAULT_SETTINGS = [
   ['FAILURE_CAUSES', 'Wear and tear,Lack of lubrication,Electrical fault,Pneumatic leak,Hydraulic fault,Operator error,Damage / accident,Design / installation,Unknown,Not a failure', 'Failure causes (comma separated)'],
   ['NOTIFY_EMAILS', '', 'Extra emails copied on new requests (comma separated, optional)'],
   ['CERT_ALERT_DAYS', '60,30,7,1', 'Telegram alert this many days before an inspection certificate expires'],
+  ['AGREEMENT_ALERT_DAYS', '60,30,7', 'Telegram alert this many days before a service agreement (AMC) ends'],
+  ['AGREEMENTS_FOLDER_ID', '1CCpAv7m7O4ZDjUuGDLTupzJMo21xl4S5', 'Drive folder for service agreements (AMC); files sent to the bot as agreements are moved here'],
   ['PM_SOON_DAYS', '7', 'PM tasks due within this many days show as "coming up"'],
   ['EXPENSE_TYPES', 'Repair,PM / Service,Spare parts,Tool purchase,Contractor,Project,Consumables,Other', 'Bill / cost types (comma separated)'],
   ['AI_MODEL', 'gemini-3.5-flash', 'Gemini model used by the Telegram assistant (run checkAi to list the ones your key can use)'],
@@ -206,6 +209,8 @@ function apiAssetPublic_(p) {
       maintainedBy: a.MaintainedBy, pmFrequency: a.PMFrequency, checklistRef: a.ChecklistRef,
       criticality: a.Criticality, notes: a.Notes,
       certUrl: a.CertFileId ? 'https://drive.google.com/file/d/' + a.CertFileId + '/view' : '',
+      agreementUrl: a.AgreementFileId ? 'https://drive.google.com/file/d/' + a.AgreementFileId + '/view' : '',
+      agreementFrom: iso_(a.AgreementFrom), agreementUntil: iso_(a.AgreementUntil),
       jobs: readTable_('WorkOrders').rows
         .filter(function (w) { return String(w.AssetID) === String(a.AssetID); })
         .sort(function (x, y) { return dateNum_(y.Created) - dateNum_(x.Created); })
@@ -709,17 +714,18 @@ function apiAssetSave_(p) {
   if (!clean_(d.Name, 120)) throw userError_('Please enter the asset name.');
   var editable = ['Name', 'Area', 'Location', 'Category', 'ParentID', 'Make', 'Model', 'SerialNo', 'Year', 'Specs',
     'Criticality', 'Status', 'MaintainedBy', 'PMFrequency', 'ChecklistRef', 'CertRequired', 'CertExpiry', 'CertFileId', 'Notes',
-    'MeterUnit', 'CurrentMeter'];
+    'MeterUnit', 'CurrentMeter', 'AgreementFileId', 'AgreementFrom', 'AgreementUntil'];
   var ch = {};
   editable.forEach(function (k) {
     if (d[k] === undefined) return;
-    if (k === 'CertExpiry') { ch[k] = d[k] ? parseLocal_(d[k]) || '' : ''; return; }
+    if (k === 'CertExpiry' || k === 'AgreementFrom' || k === 'AgreementUntil') { ch[k] = d[k] ? parseLocal_(d[k]) || '' : ''; return; }
     if (k === 'CurrentMeter') { ch[k] = num_(d[k]); if (ch[k] !== '') ch.MeterUpdated = new Date(); return; }
     if (k === 'ParentID') { ch[k] = cleanId_(d[k]); return; }
-    if (k === 'CertFileId') { ch[k] = driveId_(d[k]); return; }
+    if (k === 'CertFileId' || k === 'AgreementFileId') { ch[k] = driveId_(d[k]); return; }
     ch[k] = clean_(d[k], k === 'Specs' || k === 'Notes' ? 3000 : 200);
   });
   if (ch.ParentID && ch.ParentID === id) throw userError_('An asset cannot be its own parent.');
+  if (ch.AgreementFrom && ch.AgreementUntil && ch.AgreementUntil < ch.AgreementFrom) throw userError_('The agreement end date is before its start date.');
   if (p.photo) ch.Photo = savePhoto_(p.photo, 'ASSET_' + id);
   if (p.removePhoto) ch.Photo = '';
   var lock = LockService.getScriptLock();
@@ -1065,19 +1071,20 @@ function apiTemplates_(p) {
   return Object.keys(m).sort().map(function (k) { return m[k]; });
 }
 
-/** Certificates that crossed an alert threshold (60/30/7/1 days, then expired) since the last alert. */
-function certAlerts_(assets, s) {
+/** Certificates (or, with field AgreementUntil, service agreements) that crossed an alert threshold (60/30/7/1 days, then expired) since the last alert. */
+function certAlerts_(assets, s, field) {
+  field = field || 'CertExpiry';
   var props = PropertiesService.getScriptProperties();
-  var th = list_(s.CERT_ALERT_DAYS).map(Number).filter(function (x) { return x > 0; }).sort(function (a, b) { return a - b; });
+  var th = list_(field === 'CertExpiry' ? s.CERT_ALERT_DAYS : s.AGREEMENT_ALERT_DAYS).map(Number).filter(function (x) { return x > 0; }).sort(function (a, b) { return a - b; });
   var today = startOfDay_().getTime();
   var lines = [];
   assets.forEach(function (a) {
-    if (!a.AssetID || !a.CertExpiry || String(a.Status) === 'Disposed') return;
-    var exp = dateNum_(a.CertExpiry);
+    if (!a.AssetID || !a[field] || String(a.Status) === 'Disposed') return;
+    var exp = dateNum_(a[field]);
     var days = Math.round((exp - today) / 86400000);
     var level = days <= 0 ? 0 : th.filter(function (x) { return days <= x; })[0];
     if (level === undefined) return;
-    var key = 'certalert_' + a.AssetID + '_' + level;
+    var key = (field === 'CertExpiry' ? 'certalert_' : 'agralert_') + a.AssetID + '_' + level;
     var stamp = String(exp);
     if (props.getProperty(key) === stamp) return;
     props.setProperty(key, stamp);
@@ -2097,6 +2104,9 @@ function botSystem_(u, s) {
       'First call get_machine, then show what you read (make, model, serial no, year and spec lines "Label: value") next to what is already saved, ' +
       'point out anything that differs, and ask "Save?". Save only after the user agrees, with make/model/serial_no/year and specs_add ' +
       '(adds or updates lines, keeps the other existing specs). Use specs (replace all) only if the user asks to rewrite the specs. Never guess unreadable values – say what you could not read.',
+    '- Service agreement / AMC / maintenance contract for a machine (PDF or photo): get_machine first, show provider, agreement no, period, scope and price, and ask "Save?". ' +
+      'After yes: save_machine with attach_last_file_as_agreement=true, agreement_from, agreement_until, maintained_by (provider) and a short specs_add line ' +
+      '("Service agreement: <no>, <scope>, LKR <price>"). Never put an agreement in cert_expiry (that is the statutory inspection certificate).',
     '- PM checklists: mark done only when the user clearly says the check was done (all OK, or which items were Not OK). Never assume.',
     '- You cannot change the website design or program code. For that, tell the user to ask Denuwan to have it changed by the developer.',
     '- Use yyyy-mm-dd dates in tool calls. Money is LKR. Job IDs look like WO-2026-0001 or MWRF123; machine IDs like EN-CA-01, PD-AL-02, QIP08-001.',
@@ -2125,7 +2135,7 @@ var BOT_TOOLS = [
     description: { type: 'STRING' }, location: { type: 'STRING' }, asset_id: { type: 'STRING' }, priority: { type: 'STRING', enum: PRIORITIES },
     category: { type: 'STRING' }, production_stopped: { type: 'BOOLEAN' } }, required: ['description', 'priority'] } },
   { name: 'find_machines', description: 'Search machines / assets / tools by ID, name, area or location.', parameters: { type: 'OBJECT', properties: { query: { type: 'STRING' } }, required: ['query'] } },
-  { name: 'get_machine', description: 'Details of one machine: specs, certificate, meter, PM tasks, recent jobs.', parameters: { type: 'OBJECT', properties: { id: { type: 'STRING' } }, required: ['id'] } },
+  { name: 'get_machine', description: 'Details of one machine: specs, certificate, service agreement (AMC), meter, PM tasks, recent jobs.', parameters: { type: 'OBJECT', properties: { id: { type: 'STRING' } }, required: ['id'] } },
   { name: 'save_machine', description: 'Add a new machine (is_new=true) or change fields of an existing one. Only given fields change. Admin / supervisor only, except that technicians may set the machine photo (use_last_photo alone).',
     parameters: { type: 'OBJECT', properties: {
       id: { type: 'STRING' }, is_new: { type: 'BOOLEAN' }, name: { type: 'STRING' }, area: { type: 'STRING' }, location: { type: 'STRING' },
@@ -2134,7 +2144,10 @@ var BOT_TOOLS = [
       specs_add: { type: 'STRING', description: 'spec lines "Label: value", one per line; added to the existing specs (a line with the same label is updated, others are kept)' },
       criticality: { type: 'STRING', enum: ['A', 'B', 'C'] }, status: { type: 'STRING', enum: ['Active', 'Standby', 'Under repair', 'Disposed'] },
       maintained_by: { type: 'STRING' }, notes: { type: 'STRING' }, meter_unit: { type: 'STRING' }, cert_expiry: { type: 'STRING', description: 'yyyy-mm-dd' },
-      use_last_photo: { type: 'BOOLEAN', description: 'set the photo the user just sent as the machine photo (only a photo of the whole machine, never a rating plate or document)' } }, required: ['id'] } },
+      use_last_photo: { type: 'BOOLEAN', description: 'set the photo the user just sent as the machine photo (only a photo of the whole machine, never a rating plate or document)' },
+      attach_last_file_as_agreement: { type: 'BOOLEAN', description: 'link the PDF / photo the user just sent as the service agreement (AMC) document of this machine' },
+      agreement_from: { type: 'STRING', description: 'service agreement start, yyyy-mm-dd' },
+      agreement_until: { type: 'STRING', description: 'service agreement end, yyyy-mm-dd' } }, required: ['id'] } },
   { name: 'remove_machine', description: 'Remove a machine (kept as Disposed if it has history). Admin / supervisor only.', parameters: { type: 'OBJECT', properties: { id: { type: 'STRING' }, reason: { type: 'STRING' } }, required: ['id'] } },
   { name: 'set_meter', description: 'Record the hour meter reading of a machine (forklift, generator, compressor).', parameters: { type: 'OBJECT', properties: { asset_id: { type: 'STRING' }, value: { type: 'NUMBER' } }, required: ['asset_id', 'value'] } },
   { name: 'find_pm', description: 'List preventive maintenance (PM) tasks.', parameters: { type: 'OBJECT', properties: {
@@ -2316,6 +2329,18 @@ function botUser_(v) {
 
 function ymd_(v) { return v ? Utilities.formatDate(new Date(dateNum_(v)), TZ, 'yyyy-MM-dd') : ''; }
 
+/** Moves an agreement file into the Agreements folder (if set) with a clear name. Errors are logged, never fatal. */
+function fileAgreement_(fileId, assetId, from, until, provider) {
+  try {
+    var f = DriveApp.getFileById(fileId);
+    var ext = /\.pdf$/i.test(f.getName()) ? '.pdf' : '.jpg';
+    var yrs = from && until ? ' ' + String(from).slice(0, 4) + '-' + String(until).slice(0, 4) : '';
+    f.setName(assetId + ' service agreement' + yrs + (provider ? ' - ' + short_(provider, 40) : '') + ext);
+    var folderId = settings_().AGREEMENTS_FOLDER_ID;
+    if (folderId) f.moveTo(DriveApp.getFolderById(folderId));
+  } catch (err) { logError_('agreement.file', err); }
+}
+
 /** Adds spec lines ("Label: value") to existing specs: a line with the same label (any case) is replaced, other lines are kept. */
 function mergeSpecs_(old, add) {
   var label = function (l) { var m = /^\s*([^:]{1,40}):/.exec(l); return m ? m[1].trim().toLowerCase() : null; };
@@ -2407,17 +2432,24 @@ function runBotTool_(name, a, ctx) {
         ['Name', 'Area', 'Location', 'Category', 'ParentID', 'Make', 'Model', 'SerialNo', 'Year', 'Specs', 'Criticality', 'Status', 'MaintainedBy',
           'PMFrequency', 'ChecklistRef', 'CertRequired', 'CertFileId', 'Notes', 'MeterUnit'].forEach(function (k) { asset[k] = String(row[k] === undefined ? '' : row[k]); });
         asset.CertExpiry = ymd_(row.CertExpiry);
+        asset.AgreementFileId = String(row.AgreementFileId || '');
+        asset.AgreementFrom = ymd_(row.AgreementFrom); asset.AgreementUntil = ymd_(row.AgreementUntil);
       }
       var map = { name: 'Name', area: 'Area', location: 'Location', category: 'Category', parent_id: 'ParentID', make: 'Make', model: 'Model',
         serial_no: 'SerialNo', year: 'Year', specs: 'Specs', criticality: 'Criticality', status: 'Status', maintained_by: 'MaintainedBy',
-        notes: 'Notes', meter_unit: 'MeterUnit', cert_expiry: 'CertExpiry' };
+        notes: 'Notes', meter_unit: 'MeterUnit', cert_expiry: 'CertExpiry', agreement_from: 'AgreementFrom', agreement_until: 'AgreementUntil' };
       var changed = [];
       Object.keys(map).forEach(function (k) { if (a[k] !== undefined && a[k] !== null) { asset[map[k]] = String(a[k]); changed.push(map[k]); } });
       if (a.specs_add) { asset.Specs = mergeSpecs_(asset.Specs, a.specs_add); if (changed.indexOf('Specs') < 0) changed.push('Specs'); }
       if (a.use_last_photo && !(ctx.file && ctx.file.kind === 'photo')) throw userError_('Please send the machine photo first.');
+      if (a.attach_last_file_as_agreement) {
+        if (!ctx.file) throw userError_('Please send the agreement (PDF or photo) first.');
+        asset.AgreementFileId = ctx.file.id; changed.push('AgreementFile');
+      }
       // technicians may set the machine photo only; anything else needs the admin or supervisor (apiAssetSave_ checks)
       var photoOnly = row && a.use_last_photo && !changed.length && !isManager_(u);
       var sv = photoOnly ? { id: id } : apiAssetSave_({ token: tok, asset: asset, isNew: !row });
+      if (a.attach_last_file_as_agreement) fileAgreement_(ctx.file.id, id, asset.AgreementFrom, asset.AgreementUntil, asset.MaintainedBy);
       if (a.use_last_photo) {
         setAssetPhoto_(id, ctx.file.id);
         changed.push('Photo');
@@ -2580,6 +2612,7 @@ function dailyDigest() {
     .filter(function (x) { return x.state === 'overdue' || x.state === 'today'; })
     .sort(function (a, b) { return b.daysLate - a.daysLate; });
   var certLines = certAlerts_(assets, s);
+  var agrLines = certAlerts_(assets, s, 'AgreementUntil');
   var readLines = [];
   try { readLines = readingsDigestLines_(); } catch (err) { logError_('readingsDigest', err); }
   var pmLine = function (x) {
@@ -2625,6 +2658,10 @@ function dailyDigest() {
     if (mgr && certLines.length) {
       lines.push('', '📄 <b>Inspection certificates</b>');
       certLines.forEach(function (l) { lines.push(l); });
+    }
+    if (mgr && agrLines.length) {
+      lines.push('', '📑 <b>Service agreements (AMC) ending</b>');
+      agrLines.forEach(function (l) { lines.push(l); });
     }
     lines.push('', s.APP_URL + 'app.html');
     tgSend_(u.TelegramChatID, short_(lines.join('\n'), 4000));

@@ -183,6 +183,18 @@ assert.ok(/^FAKEFILE/.test(find_(rowsOf('Assets'), 'AssetID', 'EN-NEW-01').Photo
 script = [[['save_machine', { id: 'EN-NEW-01', location: 'Roof', use_last_photo: true }]], 'no'];
 say(333, 'EN-NEW-01 photo, location roof'); assert.match(lastToolResults()[0].error, /permission/);
 passed += 2;
+// service agreement PDF → linked to the machine (supervisor, chat 222), not to the certificate
+script = ['AMC from UML, 2026-06-15 to 2027-06-14. Save?'];
+say(222, 'generator service agreement', { document: { file_id: 'amc', mime_type: 'application/pdf' } });
+const certBefore = find_(rowsOf('Assets'), 'AssetID', 'EN-PS-06').CertExpiry;
+script = [[['save_machine', { id: 'EN-PS-06', attach_last_file_as_agreement: true, agreement_from: '2026-06-15', agreement_until: '2027-06-14', maintained_by: 'U M L Heavy Equipment Limited' }]], 'Saved.'];
+assert.strictEqual(say(222, 'save'), 'Saved.');
+const gen = find_(rowsOf('Assets'), 'AssetID', 'EN-PS-06');
+assert.ok(/^FAKEFILE/.test(gen.AgreementFileId), 'agreement file linked');
+assert.strictEqual(Utilities.formatDate(gen.AgreementUntil, TZ, 'yyyy-MM-dd'), '2027-06-14');
+assert.strictEqual(ymd_(gen.CertExpiry), ymd_(certBefore), 'certificate date untouched');
+assert.match(botSystem_(find_(rowsOf('Users'), 'UserID', 'U02'), settings_()), /attach_last_file_as_agreement/);
+passed += 4;
 script = [[['find_machines', { query: 'forklift' }], ['cost_report', { from: today.slice(0, 8) + '01' }]], 'Report.'];
 say(111, 'forklift and costs');
 const rr = lastToolResults();
