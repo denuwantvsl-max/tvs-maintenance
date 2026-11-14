@@ -2105,8 +2105,9 @@ function botSystem_(u, s) {
       'point out anything that differs, and ask "Save?". Save only after the user agrees, with make/model/serial_no/year and specs_add ' +
       '(adds or updates lines, keeps the other existing specs). Use specs (replace all) only if the user asks to rewrite the specs. Never guess unreadable values – say what you could not read.',
     '- Service agreement / AMC / maintenance contract for a machine (PDF or photo): get_machine first, show provider, agreement no, period, scope and price, and ask "Save?". ' +
-      'After yes: save_machine with attach_last_file_as_agreement=true, agreement_from, agreement_until, maintained_by (provider) and a short specs_add line ' +
-      '("Service agreement: <no>, <scope>, LKR <price>"). Never put an agreement in cert_expiry (that is the statutory inspection certificate).',
+      'After yes: save_machine with attach_last_file_as_agreement=true, agreement_from, agreement_until, maintained_by (provider) and notes_add ' +
+      '"Service agreement: <provider> <no>, <from> to <until> - <scope> - LKR <price>". Never put agreement details or prices in specs (specs are shown on the public QR page) ' +
+      'and never in cert_expiry (that is the statutory inspection certificate).',
     '- PM checklists: mark done only when the user clearly says the check was done (all OK, or which items were Not OK). Never assume.',
     '- You cannot change the website design or program code. For that, tell the user to ask Denuwan to have it changed by the developer.',
     '- Use yyyy-mm-dd dates in tool calls. Money is LKR. Job IDs look like WO-2026-0001 or MWRF123; machine IDs like EN-CA-01, PD-AL-02, QIP08-001.',
@@ -2141,7 +2142,8 @@ var BOT_TOOLS = [
       id: { type: 'STRING' }, is_new: { type: 'BOOLEAN' }, name: { type: 'STRING' }, area: { type: 'STRING' }, location: { type: 'STRING' },
       category: { type: 'STRING' }, parent_id: { type: 'STRING' }, make: { type: 'STRING' }, model: { type: 'STRING' }, serial_no: { type: 'STRING' },
       year: { type: 'STRING' }, specs: { type: 'STRING', description: 'REPLACES all specs – only when the user asks to rewrite them' },
-      specs_add: { type: 'STRING', description: 'spec lines "Label: value", one per line; added to the existing specs (a line with the same label is updated, others are kept)' },
+      specs_add: { type: 'STRING', description: 'spec lines "Label: value", one per line; added to the existing specs (a line with the same label is updated, others are kept). Specs are PUBLIC (QR page): no prices or contract details' },
+      notes_add: { type: 'STRING', description: 'staff-only note lines "Label: value"; added to the existing notes the same way (a line with the same label is updated)' },
       criticality: { type: 'STRING', enum: ['A', 'B', 'C'] }, status: { type: 'STRING', enum: ['Active', 'Standby', 'Under repair', 'Disposed'] },
       maintained_by: { type: 'STRING' }, notes: { type: 'STRING' }, meter_unit: { type: 'STRING' }, cert_expiry: { type: 'STRING', description: 'yyyy-mm-dd' },
       use_last_photo: { type: 'BOOLEAN', description: 'set the photo the user just sent as the machine photo (only a photo of the whole machine, never a rating plate or document)' },
@@ -2441,6 +2443,7 @@ function runBotTool_(name, a, ctx) {
       var changed = [];
       Object.keys(map).forEach(function (k) { if (a[k] !== undefined && a[k] !== null) { asset[map[k]] = String(a[k]); changed.push(map[k]); } });
       if (a.specs_add) { asset.Specs = mergeSpecs_(asset.Specs, a.specs_add); if (changed.indexOf('Specs') < 0) changed.push('Specs'); }
+      if (a.notes_add) { asset.Notes = mergeSpecs_(asset.Notes, a.notes_add); if (changed.indexOf('Notes') < 0) changed.push('Notes'); }
       if (a.use_last_photo && !(ctx.file && ctx.file.kind === 'photo')) throw userError_('Please send the machine photo first.');
       if (a.attach_last_file_as_agreement) {
         if (!ctx.file) throw userError_('Please send the agreement (PDF or photo) first.');
