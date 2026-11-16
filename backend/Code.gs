@@ -1316,7 +1316,7 @@ var READING_FIELDS = {
 var READING_SETTINGS = [
   ['READING_BY_HOUR', '10', 'Daily readings (generator, compressor, water) must be in by this hour; then a Telegram reminder goes out'],
   ['PHOTO_KEEP_DAYS', '30', 'Meter photos are deleted after this many days (numbers are kept). Photos of corrected or noted readings are kept'],
-  ['GEN_TANK_LITRES', '440', 'Generator diesel tank size in litres (turns the fuel % into litres)'],
+  ['GEN_TANK_LITRES', '650', 'Generator diesel tank size in litres (turns the fuel % into litres)'],
   ['GEN_FUEL_LOW_PCT', '25', 'Alert when the generator fuel level is below this %'],
   ['GEN_LPH_MIN', '10', 'Generator diesel use: normal range, lowest litres per running hour'],
   ['GEN_LPH_MAX', '45', 'Generator diesel use: normal range, highest litres per running hour'],

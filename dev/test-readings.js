@@ -34,7 +34,10 @@ const tech = ok('login', { userId: 'U03', pin: '2222' });
 let home = ok('readingsHome', { token: tech.token });
 assert.ok(F.active.getSheetByName('Readings') && F.active.getSheetByName('FuelLog'));
 assert.ok(find_(rowsOf('Assets'), 'AssetID', 'EN-FM-WM-01'), 'water meter machine added');
-assert.strictEqual(find_(rowsOf('Settings'), 'Key', 'GEN_TANK_LITRES').Value, '440');
+assert.strictEqual(find_(rowsOf('Settings'), 'Key', 'GEN_TANK_LITRES').Value, '650');
+// the fuel sums below were written for a 440 L tank: keep that size for the rest of this test
+setCells_(readTable_('Settings', true), find_(rowsOf('Settings'), 'Key', 'GEN_TANK_LITRES'), { Value: '440' });
+home = ok('readingsHome', { token: tech.token });
 assert.deepStrictEqual(home.points.map(x => x.id), ['GEN', 'COMP', 'WATER']);
 let gen = home.points[0];
 assert.strictEqual(gen.last.values.Hours, 1282.42);
