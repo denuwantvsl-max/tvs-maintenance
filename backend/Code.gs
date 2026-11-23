@@ -4,6 +4,7 @@
  * Phase 1: asset register, public QR asset pages, work orders, Telegram + email alerts.
  * Phase 2: preventive maintenance, digital checklists. Phase 2b: bills / costs, Telegram chat assistant (Gemini).
  * Phase 2c: daily readings (generator, compressor, water meter) read from a photo by the AI, diesel refills.
+ * Phase 2d: operator daily checks (forklifts, delivery vehicles) by QR without a PIN, leader status pages, 11:00 email.
  *
  * Secrets live ONLY in Script Properties (Project Settings > Script Properties):
  *   TELEGRAM_BOT_TOKEN  – from @BotFather (set by Denuwan)
@@ -32,7 +33,7 @@ var TABLES = {
   Users: ['UserID', 'Name', 'Role', 'Email', 'Phone', 'Active', 'NewPIN', 'PinHash', 'TelegramChatID',
     'TelegramLinkCode', 'LastLogin'],
   ChecklistItems: ['TemplateID', 'TemplateTitle', 'DocNo', 'ItemNo', 'Section', 'Text', 'TextSi', 'Type', 'Unit', 'Min',
-    'Max', 'Frequency', 'PerChild', 'Active'],
+    'Max', 'Frequency', 'PerChild', 'Active', 'Safety'],
   PMTasks: ['TaskID', 'AssetID', 'Title', 'TemplateID', 'Scope', 'FreqUnit', 'FreqValue', 'MeterInterval', 'NextDue',
     'LastDone', 'LastMeter', 'AssignedTo', 'DoneBy', 'Active', 'Notes', 'Created', 'Updated'],
   PMRecords: ['RecordID', 'TaskID', 'AssetID', 'TemplateID', 'Title', 'DoneAt', 'DoneBy', 'Meter', 'Results', 'OkCount',
@@ -154,7 +155,10 @@ var ROUTES = {
   genLog: apiGenLog_,
   readingAi: apiReadingAi_,
   readingSave: apiReadingSave_,
-  refillSave: apiRefillSave_
+  refillSave: apiRefillSave_,
+  opCheck: apiOpCheck_,
+  opCheckSave: apiOpCheckSave_,
+  opStatus: apiOpStatus_
 };
 
 /* =========================================================================
@@ -196,6 +200,8 @@ function apiAssetPublic_(p) {
     certRequired: yes_(a.CertRequired), certExpiry: iso_(a.CertExpiry), certStatus: certStatus_(a),
     photoUrl: photoUrl_(a.Photo)
   };
+  var og = opGroupOf_(a.AssetID);
+  if (og) out.opCheck = og.id;
   if (a.ParentID) {
     var par = find_(t.rows, 'AssetID', String(a.ParentID));
     if (par) out.parentName = par.Name;
@@ -863,7 +869,7 @@ function templateInfo_(templateId, scope) {
     .sort(function (a, b) { return (parseFloat(a.ItemNo) || 0) - (parseFloat(b.ItemNo) || 0); })
     .map(function (r) {
       return { no: String(r.ItemNo), section: r.Section, text: r.Text, textSi: r.TextSi, type: String(r.Type || 'check').toLowerCase(),
-        unit: r.Unit, min: r.Min === '' ? null : Number(r.Min), max: r.Max === '' ? null : Number(r.Max), freq: r.Frequency };
+        unit: r.Unit, min: r.Min === '' ? null : Number(r.Min), max: r.Max === '' ? null : Number(r.Max), freq: r.Frequency, safety: yes_(r.Safety) };
     });
   return { id: rows[0].TemplateID, title: rows[0].TemplateTitle, docNo: rows[0].DocNo, perChild: rows.some(function (r) { return yes_(r.PerChild); }), items: items };
 }
@@ -891,15 +897,19 @@ function recordSummary_(r) {
     meter: r.Meter, okCount: r.OkCount, notOkCount: r.NotOkCount, woId: r.WO_ID, contractor: r.Contractor };
 }
 
-/** Saves a filled checklist (or a contractor service record), moves the task to its next due date, and opens a job for Not OK items. */
-function apiPmComplete_(p) {
-  var u = auth_(p);
-  var d = p.data || {};
+/**
+ * Saves a filled checklist (or a contractor service record), moves the task to its next due date, and opens a job for Not OK items.
+ * byName = who did it (staff user name, or the name an operator typed). opts.operator = public operator daily check (needs a note
+ * for each Not OK item, next due = next working day, leader email); opts.group / opts.s for that.
+ */
+function completePm_(byName, d, opts) {
+  opts = opts || {};
+  var op = !!opts.operator;
   var now = new Date();
-  var s = settings_();
+  var s = opts.s || settings_();
   var lock = LockService.getScriptLock();
   lock.waitLock(25000);
-  var rec, wo = null, taskTitle, asset;
+  var rec, wo = null, taskTitle, asset, unsafe = [], notOk = [];
   try {
     var tt = readTable_('PMTasks', true);
     var t = find_(tt.rows, 'TaskID', String(d.taskId || ''));
@@ -913,8 +923,9 @@ function apiPmComplete_(p) {
       children = at.rows.filter(function (c) { return String(c.ParentID).toUpperCase() === String(t.AssetID).toUpperCase() && String(c.Status) !== 'Disposed'; })
         .map(function (c) { return c.AssetID; });
     }
-    var results = d.results || {};
-    var values = {}, notOk = [], ok = 0, missing = 0;
+    if (op && !isOpTemplate_(t.TemplateID)) throw userError_('This task is not an operator daily check.');
+    var results = d.results || {}, notesIn = d.notes || {};
+    var values = {}, notes = {}, ok = 0, missing = 0, noNote = 0;
     var check = function (it, child) {
       var key = (child ? child + '|' : '') + it.no;
       var v = results[key];
@@ -931,7 +942,12 @@ function apiPmComplete_(p) {
       } else {
         if (['ok', 'nok', 'na'].indexOf(v) < 0) { missing++; return; }
         values[key] = v;
-        if (v === 'nok') notOk.push(label); else if (v === 'ok') ok++;
+        if (v === 'nok') {
+          var nt = clean_(notesIn[key], 200);
+          if (nt) notes[key] = nt; else if (op) noNote++;
+          notOk.push(label + (nt ? ' – ' + nt : ''));
+          if (it.safety) unsafe.push(label);
+        } else if (v === 'ok') ok++;
       }
     };
     if (tpl) {
@@ -939,47 +955,55 @@ function apiPmComplete_(p) {
         if (children.length) children.forEach(function (c) { check(it, c); }); else check(it, null);
       });
       if (missing) throw userError_('Please answer all items (' + missing + ' not answered).');
+      if (noNote) throw userError_('Please write what is wrong for each Not OK item.');
     }
     var remarks = clean_(d.remarks, 1000);
-    var contractor = clean_(d.contractor, 100);
+    var contractor = op ? '' : clean_(d.contractor, 100);
     if (!tpl && !remarks && !contractor) throw userError_('Please write what was done (or the contractor name).');
     var meter = num_(d.meter);
     if (meter !== '' && asset && String(asset.CurrentMeter) !== '' && meter < Number(asset.CurrentMeter)) {
       throw userError_('Meter reading is lower than the last reading (' + asset.CurrentMeter + ').');
     }
-    if (asset && asset.MeterUnit && t.MeterInterval && meter === '') throw userError_('Please enter the hour meter reading.');
+    if (op && meter !== '' && asset && String(asset.CurrentMeter) !== '') {
+      var daysSince = asset.MeterUpdated ? Math.max(1, Math.ceil((now.getTime() - dateNum_(asset.MeterUpdated)) / 86400000)) : 30;
+      if (meter > Number(asset.CurrentMeter) + daysSince * 24) throw userError_('Hour meter reading looks too high (last reading ' + asset.CurrentMeter + '). Please check it.');
+    }
+    if (!op && asset && asset.MeterUnit && t.MeterInterval && meter === '') throw userError_('Please enter the hour meter reading.');
 
     var rt = readTable_('PMRecords', true);
     var prefix = 'PM-' + Utilities.formatDate(now, TZ, 'yyMMdd') + '-';
     var seq = rt.rows.filter(function (r) { return String(r.RecordID).indexOf(prefix) === 0; }).length + 1;
     rec = {
       RecordID: prefix + ('00' + seq).slice(-3), TaskID: t.TaskID, AssetID: t.AssetID, TemplateID: t.TemplateID || '', Title: t.Title,
-      DoneAt: now, DoneBy: u.Name, Meter: meter, OkCount: ok, NotOkCount: notOk.length, Remarks: remarks, Contractor: contractor,
-      Cost: num_(d.cost),
+      DoneAt: now, DoneBy: byName, Meter: meter, OkCount: ok, NotOkCount: notOk.length, Remarks: remarks, Contractor: contractor,
+      Cost: op ? '' : num_(d.cost),
       Results: tpl ? JSON.stringify({ doc: tpl.docNo, title: tpl.title, items: tpl.items.map(function (i) { return [i.no, i.section || '', i.text, i.type, i.unit || '']; }),
-        children: children, values: values }) : ''
+        children: children, values: values, notes: notes, by: op ? 'operator' : 'staff' }) : ''
     };
 
     if (notOk.length) {
       var wt = readTable_('WorkOrders', true);
       var crit = asset && /^A$/i.test(String(asset.Criticality));
-      var pr = crit ? 'Urgent' : 'General';
+      var pr = (crit || unsafe.length) ? 'Urgent' : 'General';
       wo = {
-        WO_ID: nextWoId_(wt.rows, now), Created: now, RequesterName: u.Name, RequesterEmail: '', Department: 'Maintenance',
+        WO_ID: nextWoId_(wt.rows, now), Created: now, RequesterName: byName + (op ? ' (daily check)' : ''), RequesterEmail: '',
+        Department: op && opts.group ? opts.group.dept : 'Maintenance',
         Location: asset ? asset.Location : '', AssetID: t.AssetID, AssetName: asset ? asset.Name : '', Category: 'General Maintenance',
-        Priority: pr, Description: 'Not OK in PM check ' + rec.RecordID + ' (' + t.Title + '):\n• ' + notOk.slice(0, 40).join('\n• ') +
-          (remarks ? '\nRemarks: ' + remarks : ''), ProductionStopped: 'No', Status: 'NEW', WorkType: 'Corrective',
+        Priority: pr, Description: (op ? 'Not OK in operator daily check ' : 'Not OK in PM check ') + rec.RecordID + ' (' + t.Title + ', by ' + byName + '):\n• ' +
+          notOk.slice(0, 40).join('\n• ') + (unsafe.length ? '\nSAFETY item Not OK – operator told not to use the machine.' : '') +
+          (remarks ? '\nRemarks: ' + remarks : ''), ProductionStopped: 'No', Status: 'NEW', WorkType: unsafe.length ? 'Safety' : 'Corrective',
         DueAt: new Date(now.getTime() + targetHours_(pr, s) * 3600000), ConfirmKey: Utilities.getUuid().replace(/-/g, '').slice(0, 16),
         Updated: now, Source: 'PM'
       };
       appendObj_('WorkOrders', wo);
-      addLog_(wo.WO_ID, u.Name, 'Created from PM check', '', 'NEW', rec.RecordID);
+      addLog_(wo.WO_ID, byName, op ? 'Created from operator daily check' : 'Created from PM check', '', 'NEW', rec.RecordID);
       rec.WO_ID = wo.WO_ID;
     }
     appendObj_('PMRecords', rec);
 
     var ch = { LastDone: now, Updated: now };
-    if (t.FreqUnit) ch.NextDue = addPeriod_(now, t.FreqUnit, t.FreqValue);
+    if (op) ch.NextDue = nextOpWorkday_(now, s);
+    else if (t.FreqUnit) ch.NextDue = addPeriod_(now, t.FreqUnit, t.FreqValue);
     if (meter !== '' && t.MeterInterval) ch.LastMeter = meter;
     setCells_(tt, t, ch);
     if (meter !== '' && asset) setCells_(at, asset, { CurrentMeter: meter, MeterUpdated: now });
@@ -994,10 +1018,13 @@ function apiPmComplete_(p) {
     } catch (err) { logError_('pmComplete.photo', err); }
   }
   if (wo) {
-    notifyRoles_(TEAM_ROLES, '⚠️ <b>' + wo.WO_ID + ' – Not OK in PM check</b> [' + esc_(wo.Priority) + ']\n🔧 ' + esc_(wo.AssetID + ' – ' + wo.AssetName) +
-      '\n👷 ' + esc_(u.Name) + '\n📝 ' + esc_(short_(wo.Description, 500)) + '\n\n' + s.APP_URL + 'app.html#wo=' + wo.WO_ID);
+    notifyRoles_(TEAM_ROLES, (unsafe.length ? '🚫' : '⚠️') + ' <b>' + wo.WO_ID + ' – Not OK in ' + (op ? 'operator daily check' : 'PM check') + '</b> [' + esc_(wo.Priority) + ']\n🔧 ' +
+      esc_(wo.AssetID + ' – ' + wo.AssetName) + '\n👷 ' + esc_(byName) + '\n📝 ' + esc_(short_(wo.Description, 500)) + '\n\n' + s.APP_URL + 'app.html#wo=' + wo.WO_ID);
   }
-  return { recordId: rec.RecordID, woId: wo ? wo.WO_ID : '', notOk: rec.NotOkCount, ok: rec.OkCount };
+  if (op && notOk.length && opts.group) {
+    try { opProblemMail_(opts.group, asset, rec, notOk, unsafe, wo, s); } catch (err) { logError_('opProblemMail', err); }
+  }
+  return { recordId: rec.RecordID, woId: wo ? wo.WO_ID : '', notOk: rec.NotOkCount, ok: rec.OkCount, unsafe: unsafe };
 }
 
 function apiPmSave_(p) {
@@ -1875,6 +1902,382 @@ function readingsDigestLines_() {
 }
 
 /* =========================================================================
+ * Operator daily checks (Phase 2d): forklifts and delivery vehicles are checked every working day by the person who
+ * uses them. QR on the machine -> check.html?id=… (no PIN: the operator types / picks a name). Leaders see a public
+ * status page daily-checks.html?g=forklift / ?g=delivery and get an email at 11:00 when a check is missing.
+ * ========================================================================= */
+
+var OPCHECK_GROUPS = [
+  { id: 'forklift', title: 'Forklifts', titleSi: 'ෆෝක්ලිෆ්ට්', assetsKey: 'FORKLIFT_ASSETS', emailKey: 'FORKLIFT_LEADER_EMAIL', dept: 'Stores' },
+  { id: 'delivery', title: 'Delivery vehicles', titleSi: 'බෙදාහැරීමේ වාහන', assetsKey: 'DELIVERY_ASSETS', emailKey: 'DELIVERY_LEADER_EMAIL', dept: 'Stores' }
+];
+
+var OPCHECK_SETTINGS = [
+  ['FORKLIFT_ASSETS', 'ST-MM-01,ST-MM-02,ST-MM-03', 'Forklifts checked every working day by their operators (QR label opens check.html)'],
+  ['FORKLIFT_LEADER_EMAIL', 'shantha.s@tvslanka.lk', 'Stores in charge: gets forklift daily-check problems and the "not done" email (comma separated)'],
+  ['DELIVERY_ASSETS', 'ST-LP-01,ST-LP-02,ST-LP-03,ST-LP-04,ST-LP-05,ST-LP-06,ST-LP-07', 'Delivery vehicles (lorry + lifting platform) checked every working day by their drivers'],
+  ['DELIVERY_LEADER_EMAIL', 'arunaw@tvsauto.lk', 'Delivery in charge: gets delivery-vehicle daily-check problems and the "not done" email (comma separated)'],
+  ['OPCHECK_BY_HOUR', '11', 'Operator daily checks must be done by this hour (24 h clock); the "not done" email goes out after it'],
+  ['OPCHECK_DAYS', 'Mon,Tue,Wed,Thu,Fri,Sat', 'Working days for operator daily checks']
+];
+
+/** Operator checklists: [ItemNo, Section, Text, TextSi, Safety]. Safety = the machine must not be used when Not OK. */
+var OPCHECK_TEMPLATES = {
+  'CL-34-D': { title: 'Diesel forklift daily check (operator)', docNo: 'TVS/QMS/CL/34', items: [
+    [1, 'Before starting', 'Diesel level enough for the shift', 'ෂිෆ්ට් එකට ප්‍රමාණවත් ඩීසල් තිබේ', ''],
+    [2, 'Before starting', 'Engine oil level', 'එන්ජින් ඔයිල් මට්ටම', ''],
+    [3, 'Before starting', 'Radiator water (coolant) level', 'රේඩියේටර් වතුර (කූලන්ට්) මට්ටම', ''],
+    [4, 'Before starting', 'Hydraulic oil level', 'හයිඩ්‍රොලික් ඔයිල් මට්ටම', ''],
+    [5, 'Before starting', 'No oil, diesel or water leaks under the forklift', 'ෆෝක්ලිෆ්ට් එක යට ඔයිල්, ඩීසල් හෝ වතුර කාන්දු නැත', ''],
+    [6, 'Before starting', 'Tyres – no damage, not worn out', 'ටයර් – හානි නැත, ගෙවී නැත', ''],
+    [7, 'Before starting', 'Forks – no cracks or bends, fork locking pins in place', 'ෆෝක් – ඉරිතැලීම් හෝ නැමීම් නැත, ෆෝක් ලොක් පින් හරි තැන', 'Yes'],
+    [8, 'Before starting', 'Mast and lift chains – no damage, oiled', 'මාස්ට් සහ ලිෆ්ට් චේන් – හානි නැත, ඔයිල් දමා ඇත', 'Yes'],
+    [9, 'Before starting', 'Overhead guard and load backrest – no damage', 'හිසට ඉහළ ආරක්ෂක රාමුව සහ බඩු පිටුපස රාමුව – හානි නැත', 'Yes'],
+    [10, 'Before starting', 'Seat and seat belt OK', 'ආසනය සහ සීට් බෙල්ට් හොඳයි', 'Yes'],
+    [11, 'After starting', 'No warning lights on the dashboard', 'ඩෑෂ්බෝඩ් එකේ අනතුරු ඇඟවීමේ ලයිට් නැත', ''],
+    [12, 'After starting', 'No unusual noise, smoke or vibration', 'අසාමාන්‍ය ශබ්ද, දුම හෝ කම්පන නැත', ''],
+    [13, 'After starting', 'Foot brake works', 'පාද බ්‍රේක් හරියට වැඩ කරයි', 'Yes'],
+    [14, 'After starting', 'Hand (parking) brake holds', 'හෑන්ඩ් බ්‍රේක් හරියට අල්ලයි', 'Yes'],
+    [15, 'After starting', 'Steering smooth', 'ස්ටියරින් එක සුමටව කැරකේ', 'Yes'],
+    [16, 'After starting', 'Lift, lower and tilt work smoothly (full range)', 'ඔසවීම, පහත් කිරීම සහ ඇල කිරීම සුමටව වැඩ කරයි (සම්පූර්ණ පරාසය)', 'Yes'],
+    [17, 'After starting', 'Horn works', 'හෝන් එක වැඩ කරයි', 'Yes'],
+    [18, 'After starting', 'Lights and reverse alarm / beeper work', 'ලයිට් සහ රිවර්ස් ඇලාම් / බීපර් වැඩ කරයි', ''],
+    [19, 'After starting', 'Mirrors clean and in place', 'කණ්ණාඩි පිරිසිදුයි, හරි තැන තිබේ', '']
+  ] },
+  'CL-34-E': { title: 'Electric forklift daily check (operator)', docNo: 'TVS/QMS/CL/34', items: [
+    [1, 'Before starting', 'Battery charge enough for the shift (charge meter)', 'ෂිෆ්ට් එකට ප්‍රමාණවත් බැටරි චාජ් තිබේ (චාජ් මීටරය)', ''],
+    [2, 'Before starting', 'Battery water level OK (top up with distilled water only if needed)', 'බැටරි වතුර මට්ටම හරි (අවශ්‍ය නම් පමණක් ඩිස්ටිල් වතුර දමන්න)', ''],
+    [3, 'Before starting', 'Battery cables, plug and connector – no damage, not hot', 'බැටරි කේබල්, ප්ලග් සහ කනෙක්ටර් – හානි නැත, රත් වී නැත', 'Yes'],
+    [4, 'Before starting', 'Battery cover closed and locked', 'බැටරි කවරය වසා ලොක් කර ඇත', ''],
+    [5, 'Before starting', 'Charger and charging cable – no damage', 'චාජරය සහ චාජින් කේබලය – හානි නැත', ''],
+    [6, 'Before starting', 'Hydraulic oil level, no oil leaks under the forklift', 'හයිඩ්‍රොලික් ඔයිල් මට්ටම හරි, ෆෝක්ලිෆ්ට් එක යට ඔයිල් කාන්දු නැත', ''],
+    [7, 'Before starting', 'Tyres – no damage, not worn out', 'ටයර් – හානි නැත, ගෙවී නැත', ''],
+    [8, 'Before starting', 'Forks – no cracks or bends, fork locking pins in place', 'ෆෝක් – ඉරිතැලීම් හෝ නැමීම් නැත, ෆෝක් ලොක් පින් හරි තැන', 'Yes'],
+    [9, 'Before starting', 'Mast and lift chains – no damage, oiled', 'මාස්ට් සහ ලිෆ්ට් චේන් – හානි නැත, ඔයිල් දමා ඇත', 'Yes'],
+    [10, 'Before starting', 'Overhead guard and load backrest – no damage', 'හිසට ඉහළ ආරක්ෂක රාමුව සහ බඩු පිටුපස රාමුව – හානි නැත', 'Yes'],
+    [11, 'Before starting', 'Seat and seat belt OK', 'ආසනය සහ සීට් බෙල්ට් හොඳයි', 'Yes'],
+    [12, 'After switching on', 'Emergency stop (red button) works', 'හදිසි නැවතුම් රතු බොත්තම වැඩ කරයි', 'Yes'],
+    [13, 'After switching on', 'No error code or warning light on the display', 'ඩිස්ප්ලේ එකේ දෝෂ කේත හෝ අනතුරු ලයිට් නැත', ''],
+    [14, 'After switching on', 'No unusual noise or vibration', 'අසාමාන්‍ය ශබ්ද හෝ කම්පන නැත', ''],
+    [15, 'After switching on', 'Foot brake works', 'පාද බ්‍රේක් හරියට වැඩ කරයි', 'Yes'],
+    [16, 'After switching on', 'Parking brake holds', 'පාකින් බ්‍රේක් හරියට අල්ලයි', 'Yes'],
+    [17, 'After switching on', 'Steering smooth', 'ස්ටියරින් එක සුමටව කැරකේ', 'Yes'],
+    [18, 'After switching on', 'Lift, lower and tilt work smoothly (full range)', 'ඔසවීම, පහත් කිරීම සහ ඇල කිරීම සුමටව වැඩ කරයි (සම්පූර්ණ පරාසය)', 'Yes'],
+    [19, 'After switching on', 'Horn works', 'හෝන් එක වැඩ කරයි', 'Yes'],
+    [20, 'After switching on', 'Lights and reverse alarm / beeper work', 'ලයිට් සහ රිවර්ස් ඇලාම් / බීපර් වැඩ කරයි', ''],
+    [21, 'After switching on', 'Mirrors clean and in place', 'කණ්ණාඩි පිරිසිදුයි, හරි තැන තිබේ', '']
+  ] },
+  'CL-35-D': { title: 'Delivery vehicle & lifting platform daily check (driver)', docNo: 'TVS/QMS/CL/35', items: [
+    [1, 'Lorry – before driving', 'Engine oil level', 'එන්ජින් ඔයිල් මට්ටම', ''],
+    [2, 'Lorry – before driving', 'Radiator water (coolant) level', 'රේඩියේටර් වතුර (කූලන්ට්) මට්ටම', ''],
+    [3, 'Lorry – before driving', 'Brake fluid level', 'බ්‍රේක් ඔයිල් මට්ටම', ''],
+    [4, 'Lorry – before driving', 'Diesel enough for the trip', 'ගමනට ප්‍රමාණවත් ඩීසල් තිබේ', ''],
+    [5, 'Lorry – before driving', 'No oil, diesel or water leaks under the lorry', 'ලොරිය යට ඔයිල්, ඩීසල් හෝ වතුර කාන්දු නැත', ''],
+    [6, 'Lorry – before driving', 'Tyres – air pressure OK, no cuts or bulges (spare tyre too)', 'ටයර් – වාතය හරි, කැපීම් හෝ ඉදිමීම් නැත (ස්පෙයාර් ටයරයත්)', 'Yes'],
+    [7, 'Lorry – before driving', 'Wheel nuts tight, none missing', 'රෝද ඇණ තදයි, කිසිවක් නැති වී නැත', 'Yes'],
+    [8, 'Lorry – before driving', 'Head lights, indicators, brake lights and reverse light work', 'හෙඩ් ලයිට්, සිග්නල් ලයිට්, බ්‍රේක් ලයිට් සහ රිවර්ස් ලයිට් වැඩ කරයි', ''],
+    [9, 'Lorry – before driving', 'Mirrors and windscreen clean, no cracks; wipers work', 'කණ්ණාඩි සහ ඉදිරි වීදුරුව පිරිසිදුයි, ඉරිතැලීම් නැත; වයිපර් වැඩ කරයි', ''],
+    [10, 'Lorry – before driving', 'Cabin door locks work', 'කැබින් දොරවල් ලොක් වැඩ කරයි', ''],
+    [11, 'Lorry – before driving', 'Seat belts work', 'සීට් බෙල්ට් වැඩ කරයි', ''],
+    [12, 'Lorry – before driving', 'Revenue licence, insurance and vehicle documents in the lorry', 'ආදායම් බලපත්‍රය, රක්ෂණය සහ වාහන ලියකියවිලි ලොරියේ තිබේ', ''],
+    [13, 'Lorry – after starting', 'No warning lights on the dashboard', 'ඩෑෂ්බෝඩ් එකේ අනතුරු ඇඟවීමේ ලයිට් නැත', ''],
+    [14, 'Lorry – after starting', 'Foot brake and hand brake work', 'පාද බ්‍රේක් සහ හෑන්ඩ් බ්‍රේක් වැඩ කරයි', 'Yes'],
+    [15, 'Lorry – after starting', 'Steering OK, no free play', 'ස්ටියරින් හොඳයි, බුරුල් ගතියක් නැත', 'Yes'],
+    [16, 'Lorry – after starting', 'Horn works', 'හෝන් එක වැඩ කරයි', 'Yes'],
+    [17, 'Lifting platform', 'Platform goes up and down smoothly, no jerks', 'ප්ලැට්ෆෝම් එක ගැස්සීම් නැතිව සුමටව ඉහළ පහළ යයි', 'Yes'],
+    [18, 'Lifting platform', 'Hydraulic oil level; hoses and cylinders – no leaks', 'හයිඩ්‍රොලික් ඔයිල් මට්ටම; හෝස් සහ සිලින්ඩර – කාන්දු නැත', ''],
+    [19, 'Lifting platform', 'Wire ropes / chains – no broken wires, kinks or damage', 'වයර් රෝප් / චේන් – කැඩුණු කම්බි, ඇඹරීම් හෝ හානි නැත', 'Yes'],
+    [20, 'Lifting platform', 'Hook condition – no cracks, bends or wear; safety latch closes', 'කොක්කේ තත්ත්වය – ඉරිතැලීම්, නැමීම් හෝ ගෙවීම් නැත; සේෆ්ටි ලැච් එක වැසේ', 'Yes'],
+    [21, 'Lifting platform', 'Platform locks / latches hold it closed for travel', 'ගමනේදී ප්ලැට්ෆෝම් එක වසා තබන ලොක් / ලැච් හරියට අල්ලයි', 'Yes'],
+    [22, 'Lifting platform', 'Control switch / remote works; buffers and stoppers in place', 'පාලන ස්විචය / රිමෝට් වැඩ කරයි; බෆර් සහ ස්ටොපර් හරි තැන තිබේ', ''],
+    [23, 'Lifting platform', 'Platform floor – no damage, not slippery', 'ප්ලැට්ෆෝම් පොළොව – හානි නැත, ලිස්සන්නේ නැත', ''],
+    [24, 'Cargo', 'Load straps / ropes in good condition', 'බඩු බඳින පටි / කඹ හොඳ තත්ත්වයේ තිබේ', '']
+  ] }
+};
+
+function opGroups_(s) {
+  s = s || settings_();
+  return OPCHECK_GROUPS.map(function (g) {
+    return { id: g.id, title: g.title, titleSi: g.titleSi, dept: g.dept, emails: list_(s[g.emailKey]),
+      assets: list_(s[g.assetsKey]).map(function (x) { return x.toUpperCase(); }) };
+  });
+}
+function opGroupOf_(assetId, s) {
+  var id = String(assetId || '').toUpperCase();
+  return opGroups_(s).filter(function (g) { return g.assets.indexOf(id) >= 0; })[0] || null;
+}
+function opTemplateFor_(asset, group) {
+  if (group.id === 'delivery') return 'CL-35-D';
+  return /electric|battery/i.test(String(asset.Name) + ' ' + String(asset.Specs)) ? 'CL-34-E' : 'CL-34-D';
+}
+function isOpTemplate_(id) { return !!OPCHECK_TEMPLATES[String(id || '').toUpperCase()]; }
+/** The active daily operator task of a machine (PMTasks row), or null. */
+function opTask_(assetId, tasks) {
+  var id = String(assetId || '').toUpperCase();
+  return (tasks || readTable_('PMTasks').rows).filter(function (t) {
+    return String(t.AssetID).toUpperCase() === id && yes_(t.Active) && isOpTemplate_(t.TemplateID);
+  })[0] || null;
+}
+function dayKey_(d) { return Utilities.formatDate(d instanceof Date ? d : new Date(dateNum_(d)), TZ, 'yyyy-MM-dd'); }
+function isOpWorkday_(d, s) {
+  var days = list_((s || settings_()).OPCHECK_DAYS).map(function (x) { return x.slice(0, 3).toLowerCase(); });
+  return days.indexOf(Utilities.formatDate(d, TZ, 'EEE').toLowerCase()) >= 0;
+}
+/** Start of the next working day after `from`. */
+function nextOpWorkday_(from, s) {
+  var d = addPeriod_(from, 'Day', 1);
+  for (var i = 0; i < 7 && !isOpWorkday_(d, s); i++) d = addPeriod_(d, 'Day', 1);
+  return d;
+}
+
+/** First use: settings rows, the Safety column, the three operator checklists and one daily task per machine. Safe to run again. */
+function ensureOpChecks_() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('OPCHECK_READY') === '1') return;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(25000);
+  try {
+    if (props.getProperty('OPCHECK_READY') === '1') return;
+    var st = readTable_('Settings', true);
+    OPCHECK_SETTINGS.forEach(function (row) {
+      if (!find_(st.rows, 'Key', row[0])) appendObj_('Settings', { Key: row[0], Value: row[1], Description: row[2] });
+    });
+    var sh = sheet_('ChecklistItems');
+    var heads = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0].map(function (x) { return String(x).trim(); });
+    if (heads.indexOf('Safety') < 0) sh.getRange(1, heads.filter(String).length + 1).setValue('Safety');
+    delete TABLE_CACHE_.ChecklistItems;
+    var have = {};
+    readTable_('ChecklistItems', true).rows.forEach(function (r) { have[String(r.TemplateID).toUpperCase()] = 1; });
+    Object.keys(OPCHECK_TEMPLATES).forEach(function (id) {
+      if (have[id]) return;
+      var tp = OPCHECK_TEMPLATES[id];
+      tp.items.forEach(function (it) {
+        appendObj_('ChecklistItems', { TemplateID: id, TemplateTitle: tp.title, DocNo: tp.docNo, ItemNo: it[0], Section: it[1], Text: it[2],
+          TextSi: it[3], Type: 'check', Frequency: 'Daily', Active: 'Yes', Safety: it[4] });
+      });
+    });
+    var s = settings_(), now = new Date(), amap = assetMap_();
+    var tt = readTable_('PMTasks', true);
+    opGroups_(s).forEach(function (g) {
+      g.assets.forEach(function (aid) {
+        var a = amap[aid];
+        if (!a || opTask_(aid, tt.rows)) return;
+        var tpl = opTemplateFor_(a, g);
+        var title = g.id === 'delivery' ? 'Daily check by driver (lorry + lifting platform)' : 'Daily check by operator';
+        // an existing daily task on this machine (e.g. T0003-T0005 forklift pre-start checks) becomes the operator task
+        var daily = tt.rows.filter(function (t) { return String(t.AssetID).toUpperCase() === aid && yes_(t.Active) && t.FreqUnit === 'Day'; })[0];
+        if (daily) {
+          setCells_(tt, daily, { TemplateID: tpl, Title: title, Scope: 'All', DoneBy: 'Operator', AssignedTo: '', Updated: now });
+        } else {
+          var max = 0;
+          tt.rows.forEach(function (r) { var m = /^T(\d+)$/.exec(String(r.TaskID)); if (m) max = Math.max(max, Number(m[1])); });
+          appendObj_('PMTasks', { TaskID: 'T' + ('000' + (max + 1)).slice(-4), AssetID: aid, Title: title, TemplateID: tpl, Scope: 'All',
+            FreqUnit: 'Day', FreqValue: 1, NextDue: startOfDay_(now), DoneBy: 'Operator', Active: 'Yes',
+            Notes: 'Done by the person using the machine (QR label -> check.html). Status page for the ' + g.title.toLowerCase() + ' leader: daily-checks.html?g=' + g.id,
+            Created: now, Updated: now });
+          tt = readTable_('PMTasks', true);
+        }
+      });
+    });
+    if (!props.getProperty('OPCHECK_START')) props.setProperty('OPCHECK_START', dayKey_(now));
+    props.setProperty('OPCHECK_READY', '1');
+  } finally { lock.releaseLock(); }
+}
+
+/** Public: what the operator page needs (machine, checklist, today's checks, names used before). */
+function apiOpCheck_(p) {
+  ensureOpChecks_();
+  var s = settings_();
+  var id = cleanId_(p.id);
+  var g = opGroupOf_(id, s);
+  if (!g) throw userError_('No daily check for this machine: ' + id);
+  var a = assetMap_()[id];
+  if (!a) throw userError_('Machine not found: ' + id);
+  var t = opTask_(id);
+  if (!t) throw userError_('Daily check is not set up for ' + id + '. Please tell the maintenance team.');
+  var tpl = templateInfo_(t.TemplateID, 'All');
+  var today = dayKey_(new Date());
+  var recs = readTable_('PMRecords').rows.filter(function (r) { return r.RecordID && String(r.TaskID) === String(t.TaskID); });
+  var names = {}, since = Date.now() - 90 * 86400000;
+  readTable_('PMRecords').rows.forEach(function (r) {
+    if (g.assets.indexOf(String(r.AssetID).toUpperCase()) >= 0 && dateNum_(r.DoneAt) >= since && r.DoneBy) names[String(r.DoneBy).trim()] = 1;
+  });
+  return {
+    asset: { id: a.AssetID, name: a.Name, location: a.Location, photoUrl: photoUrl_(a.Photo), meterUnit: a.MeterUnit || '', currentMeter: a.CurrentMeter === '' ? '' : a.CurrentMeter },
+    group: { id: g.id, title: g.title, titleSi: g.titleSi },
+    template: tpl,
+    byHour: Number(s.OPCHECK_BY_HOUR) || 11,
+    workday: isOpWorkday_(new Date(), s),
+    today: recs.filter(function (r) { return dayKey_(r.DoneAt) === today; }).map(function (r) {
+      return { at: iso_(r.DoneAt), by: r.DoneBy, notOk: Number(r.NotOkCount) || 0, woId: r.WO_ID || '' };
+    }),
+    names: Object.keys(names).sort().slice(0, 60)
+  };
+}
+
+/** Public: saves an operator daily check (no login – the operator gives a name). */
+function apiOpCheckSave_(p) {
+  if (p.website) throw userError_('Rejected.');
+  ensureOpChecks_();
+  var s = settings_();
+  var d = p.data || {};
+  var id = cleanId_(d.assetId);
+  var g = opGroupOf_(id, s);
+  if (!g) throw userError_('No daily check for this machine: ' + id);
+  var name = clean_(d.name, 60).replace(/\s+/g, ' ');
+  if (name.length < 2) throw userError_('Please type your name.');
+  var t = opTask_(id);
+  if (!t) throw userError_('Daily check is not set up for ' + id + '.');
+  var cache = CacheService.getScriptCache(), ck = 'opcheck_' + id + '_' + dayKey_(new Date()).replace(/-/g, '');
+  var n = Number(cache.get(ck) || 0);
+  if (n >= 8) throw userError_('Too many checks for this machine today. Please tell the maintenance team.');
+  cache.put(ck, String(n + 1), 21600);
+  d.taskId = t.TaskID;
+  return completePm_(name, d, { operator: true, group: g, s: s });
+}
+
+function apiPmComplete_(p) {
+  var u = auth_(p);
+  return completePm_(u.Name, p.data || {}, null);
+}
+
+/** Problems written in one PM record: ["Brakes – pulls to the left", …]. */
+function recordProblems_(r) {
+  var x;
+  try { x = r.Results ? JSON.parse(r.Results) : null; } catch (e) { x = null; }
+  if (!x || !x.items) return [];
+  var out = [];
+  var notes = x.notes || {}, vals = x.values || {};
+  var kids = x.children && x.children.length ? x.children : [null];
+  kids.forEach(function (c) {
+    x.items.forEach(function (it) {
+      var key = (c ? c + '|' : '') + it[0];
+      if (vals[key] === 'nok') out.push((c ? c + ': ' : '') + it[2] + (notes[key] ? ' – ' + notes[key] : ''));
+    });
+  });
+  return out;
+}
+
+/** Public: status page for a group leader – today and the last 7 days, who checked, problems and open jobs. */
+function apiOpStatus_(p) {
+  ensureOpChecks_();
+  var s = settings_();
+  var g = opGroups_(s).filter(function (x) { return x.id === String(p.g || '').toLowerCase(); })[0];
+  if (!g) throw userError_('Unknown group. Use ?g=forklift or ?g=delivery');
+  var now = new Date(), byHour = Number(s.OPCHECK_BY_HOUR) || 11;
+  var hourNow = Number(Utilities.formatDate(now, TZ, 'H'));
+  var amap = assetMap_(), tasks = readTable_('PMTasks').rows;
+  var days = [];
+  for (var i = 6; i >= 0; i--) {
+    var dd = new Date(startOfDay_(now).getTime() - i * 86400000 + 12 * 3600000);
+    days.push({ date: dayKey_(dd), dow: Utilities.formatDate(dd, TZ, 'EEE'), workday: isOpWorkday_(dd, s) });
+  }
+  var first = startOfDay_(now).getTime() - 6 * 86400000;
+  var recs = readTable_('PMRecords').rows.filter(function (r) { return r.RecordID && dateNum_(r.DoneAt) >= first; });
+  var wos = readTable_('WorkOrders').rows;
+  var today = days[days.length - 1];
+  var startDay = PropertiesService.getScriptProperties().getProperty('OPCHECK_START') || '';
+  var machines = g.assets.map(function (aid) {
+    var a = amap[aid] || {}, t = opTask_(aid, tasks);
+    var mine = recs.filter(function (r) { return t && String(r.TaskID) === String(t.TaskID); })
+      .sort(function (x, y) { return dateNum_(x.DoneAt) - dateNum_(y.DoneAt); });
+    var week = days.map(function (dy) {
+      var rs = mine.filter(function (r) { return dayKey_(r.DoneAt) === dy.date; });
+      var isToday = dy.date === today.date;
+      var state;
+      if (rs.length) state = rs.some(function (r) { return Number(r.NotOkCount) > 0; }) ? 'problem' : 'ok';
+      else if (!dy.workday) state = 'off';
+      else if (startDay && dy.date < startDay) state = 'before';
+      else if (isToday && hourNow < byHour) state = 'waiting';
+      else state = 'missing';
+      var firstAt = rs.length ? rs[0].DoneAt : null;
+      return {
+        date: dy.date, state: state, late: !!(firstAt && Number(Utilities.formatDate(new Date(dateNum_(firstAt)), TZ, 'H')) >= byHour),
+        records: rs.map(function (r) {
+          var wo = r.WO_ID ? find_(wos, 'WO_ID', r.WO_ID) : null;
+          return { id: r.RecordID, at: iso_(r.DoneAt), by: r.DoneBy, ok: Number(r.OkCount) || 0, notOk: Number(r.NotOkCount) || 0,
+            problems: recordProblems_(r), remarks: r.Remarks || '', woId: r.WO_ID || '', woStatus: wo ? wo.Status : '', photoUrl: photoUrl_(r.Photo) };
+        })
+      };
+    });
+    var openJobs = wos.filter(function (w) { return String(w.AssetID).toUpperCase() === aid && OPEN_STATUSES.indexOf(w.Status) >= 0; })
+      .sort(function (x, y) { return dateNum_(y.Created) - dateNum_(x.Created); })
+      .map(function (w) { return { id: w.WO_ID, created: iso_(w.Created), status: w.Status, priority: w.Priority, description: short_(w.Description, 300), assignedName: userName_(w.AssignedTo) }; });
+    return { id: aid, name: a.Name || aid, location: a.Location || '', set: !!t, today: week[week.length - 1], week: week, openJobs: openJobs };
+  });
+  var cnt = function (st) { return machines.filter(function (m) { return m.today.state === st; }).length; };
+  return {
+    group: { id: g.id, title: g.title, titleSi: g.titleSi }, now: iso_(now), byHour: byHour, workday: today.workday, days: days,
+    machines: machines, counts: { total: machines.length, ok: cnt('ok'), problem: cnt('problem'), missing: cnt('missing'), waiting: cnt('waiting'), off: cnt('off') },
+    checkUrl: s.APP_URL + 'check.html?id='
+  };
+}
+
+/** Email the group leader right away when a daily check finds a problem. */
+function opProblemMail_(g, asset, rec, notOk, unsafe, wo, s) {
+  if (!g.emails.length) return;
+  var lines = [
+    'Daily check of ' + rec.AssetID + ' – ' + (asset ? asset.Name : '') + ' found ' + notOk.length + ' problem' + (notOk.length > 1 ? 's' : '') + '.',
+    '', 'Checked by: ' + rec.DoneBy, 'Time: ' + Utilities.formatDate(rec.DoneAt, TZ, 'dd MMM yyyy, HH:mm'), ''
+  ];
+  notOk.forEach(function (x) { lines.push('• ' + x); });
+  if (rec.Remarks) lines.push('', 'Remarks: ' + rec.Remarks);
+  if (unsafe.length) lines.push('', 'SAFETY: a safety item is Not OK. The operator was told not to use this machine until maintenance checks it.');
+  if (wo) lines.push('', 'Maintenance job ' + wo.WO_ID + ' was raised (' + wo.Priority + '). The maintenance team got a Telegram alert.',
+    'Follow the job: ' + s.APP_URL + 'track.html?id=' + wo.WO_ID);
+  lines.push('', 'Daily check status: ' + s.APP_URL + 'daily-checks.html?g=' + g.id, '', s.PLANT_NAME);
+  sendMail_(g.emails.join(','), (unsafe.length ? 'SAFETY – ' : '') + rec.AssetID + ' daily check: ' + notOk.length + ' problem' + (notOk.length > 1 ? 's' : '') +
+    (wo ? ' (' + wo.WO_ID + ')' : ''), lines.join('\n'));
+}
+
+/** Hourly: after OPCHECK_BY_HOUR on a working day, email each leader once when a machine has no check today. */
+function opCheckTick_(hour) {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('OPCHECK_READY') !== '1') return;
+  var s = settings_(), now = new Date();
+  var byHour = Number(s.OPCHECK_BY_HOUR) || 11;
+  if (hour < byHour || hour >= 20 || !isOpWorkday_(now, s)) return;
+  var today = dayKey_(now);
+  opGroups_(s).forEach(function (g) {
+    var key = 'OPCHECK_MAIL_' + g.id;
+    if (props.getProperty(key) === today) return;
+    props.setProperty(key, today);
+    var st = apiOpStatus_({ g: g.id });
+    var missing = st.machines.filter(function (m) { return m.today.state === 'missing'; });
+    if (!missing.length) return;
+    var list = missing.map(function (m) { return '• ' + m.id + ' – ' + m.name; });
+    var body = ['These ' + g.title.toLowerCase() + ' have NO daily check today (' + Utilities.formatDate(now, TZ, 'EEE dd MMM yyyy') + ', due by ' + byHour + ':00):', '']
+      .concat(list, ['', 'Done so far: ' + (st.counts.ok + st.counts.problem) + ' of ' + st.counts.total + '.',
+        'Please ask the operators to scan the QR label on the machine and do the check.', '',
+        'Daily check status: ' + s.APP_URL + 'daily-checks.html?g=' + g.id, '', s.PLANT_NAME]).join('\n');
+    if (g.emails.length) sendMail_(g.emails.join(','), g.title + ' daily check not done: ' + missing.length + ' of ' + st.counts.total, body);
+    notifyRoles_(MANAGER_ROLES, '🕚 <b>' + esc_(g.title) + ' – daily check not done by ' + byHour + ':00</b>\n' + esc_(list.join('\n')) +
+      '\n\n' + s.APP_URL + 'daily-checks.html?g=' + g.id);
+  });
+}
+
+/** Managers' digest lines: yesterday's operator checks per group. */
+function opDigestLines_() {
+  if (PropertiesService.getScriptProperties().getProperty('OPCHECK_READY') !== '1') return [];
+  var s = settings_(), lines = [];
+  var y = dayKey_(new Date(Date.now() - 86400000));
+  opGroups_(s).forEach(function (g) {
+    var st = apiOpStatus_({ g: g.id });
+    var di = st.days.map(function (d) { return d.date; }).indexOf(y);
+    if (di < 0 || !st.days[di].workday || st.machines.some(function (m) { return m.week[di].state === 'before'; })) return;
+    var done = 0, miss = [], prob = 0;
+    st.machines.forEach(function (m) {
+      var w = m.week[di];
+      if (w.state === 'ok' || w.state === 'problem') done++; else miss.push(m.id);
+      if (w.state === 'problem') prob++;
+    });
+    lines.push('• ' + esc_(g.title) + ': ' + done + '/' + st.machines.length + ' done' + (prob ? ', ' + prob + ' with problems' : '') +
+      (miss.length ? ' – missing ' + esc_(miss.join(', ')) : ''));
+  });
+  return lines;
+}
+
+/* =========================================================================
  * Telegram
  * ========================================================================= */
 
@@ -2591,6 +2994,7 @@ function hourlyTick() {
     setCells_(t, w, { LastOverdueAlert: now });
   });
   try { readingsTick_(hour); } catch (err) { logError_('readingsTick', err); }
+  try { opCheckTick_(hour); } catch (err) { logError_('opCheckTick', err); }
 }
 
 /**
@@ -2610,7 +3014,8 @@ function dailyDigest() {
   var doneY = wos.filter(function (w) { return dateNum_(w.CompletedAt) >= y; }).length;
   var assets = readTable_('Assets').rows;
   var amap = assetMap_();
-  var pm = readTable_('PMTasks').rows.filter(function (t) { return t.TaskID && yes_(t.Active); })
+  // operator daily checks (forklifts, delivery vehicles) are followed by their leaders – summary line for managers only
+  var pm = readTable_('PMTasks').rows.filter(function (t) { return t.TaskID && yes_(t.Active) && !isOpTemplate_(t.TemplateID); })
     .map(function (t) { return pmSummary_(t, amap[String(t.AssetID).toUpperCase()]); })
     .filter(function (x) { return x.state === 'overdue' || x.state === 'today'; })
     .sort(function (a, b) { return b.daysLate - a.daysLate; });
@@ -2618,6 +3023,8 @@ function dailyDigest() {
   var agrLines = certAlerts_(assets, s, 'AgreementUntil');
   var readLines = [];
   try { readLines = readingsDigestLines_(); } catch (err) { logError_('readingsDigest', err); }
+  var opLines = [];
+  try { opLines = opDigestLines_(); } catch (err) { logError_('opDigest', err); }
   var pmLine = function (x) {
     return '• ' + esc_(x.assetId + ' ' + short_(x.title, 40)) + (x.state === 'overdue' ? ' – <b>' + x.daysLate + ' d late</b>' : ' – today') +
       (x.meterLeft !== null && x.meterLeft <= 0 ? ' (hours reached)' : '');
@@ -2657,6 +3064,10 @@ function dailyDigest() {
     if (mgr && readLines.length) {
       lines.push('', '📟 <b>Daily readings</b>');
       readLines.forEach(function (l) { lines.push(l); });
+    }
+    if (mgr && opLines.length) {
+      lines.push('', '🚜 <b>Operator daily checks yesterday</b>');
+      opLines.forEach(function (l) { lines.push(l); });
     }
     if (mgr && certLines.length) {
       lines.push('', '📄 <b>Inspection certificates</b>');
@@ -2914,7 +3325,7 @@ function nextWoId_(rows, now) {
 
 function settings_() {
   var out = {};
-  DEFAULT_SETTINGS.concat(READING_SETTINGS).forEach(function (r) { out[r[0]] = r[1]; });
+  DEFAULT_SETTINGS.concat(READING_SETTINGS, OPCHECK_SETTINGS).forEach(function (r) { out[r[0]] = r[1]; });
   readTable_('Settings').rows.forEach(function (r) { if (r.Key) out[String(r.Key).trim()] = String(r.Value === undefined ? '' : r.Value).trim(); });
   if (out.APP_URL && !/\/$/.test(out.APP_URL)) out.APP_URL += '/';
   return out;

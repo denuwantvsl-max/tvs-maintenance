@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1726">
+<meta name="robots" content="noindex, nofollow">
+<title>Daily checks – TVS Horana</title>
+<link rel="icon" href="img/icon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="img/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Sinhala:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=5">
+<style>
+.ro { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .4px; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.12); color: #e2e8f0; }
+.dc-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.dc-head h1 { margin: 6px 0 2px; font-size: 22px; }
+.dc-upd { font-size: 12.5px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+.tiles4 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+.tl { border-radius: 14px; padding: 12px; background: #fff; border: 1px solid var(--line); }
+.tl b { display: block; font-size: 26px; line-height: 1.1; }
+.tl span { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.tl.ok b { color: var(--green); } .tl.pb b { color: #b45309; } .tl.ms b { color: var(--red); } .tl.wt b { color: #475569; }
+.dl { border-radius: 12px; padding: 10px 12px; font-size: 14.5px; margin-top: 6px; }
+.dl.info { background: #f1f5f9; color: #334155; } .dl.bad { background: #fef2f2; color: #991b1b; font-weight: 600; } .dl.good { background: #f0fdf4; color: #14532d; font-weight: 600; }
+.mc { border-left: 5px solid var(--line-2); }
+.mc.ok { border-left-color: var(--green); } .mc.problem { border-left-color: #f59e0b; } .mc.missing { border-left-color: var(--red); } .mc.waiting { border-left-color: #94a3b8; }
+.mc .top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.mc .mid { font-weight: 800; font-size: 17px; letter-spacing: .3px; }
+.mc .mname { font-size: 13.5px; color: var(--muted); }
+.stt { font-size: 12.5px; font-weight: 700; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+.stt.ok { background: #dcfce7; color: #166534; } .stt.problem { background: #fef3c7; color: #92400e; } .stt.missing { background: #fee2e2; color: #991b1b; }
+.stt.waiting { background: #f1f5f9; color: #475569; } .stt.off { background: #f1f5f9; color: #64748b; }
+.rec { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 14px; }
+.rec .late { font-size: 11px; font-weight: 700; color: #b45309; background: #fef3c7; border-radius: 6px; padding: 0 6px; margin-left: 4px; }
+.rec ul { margin: 4px 0 0; padding-left: 18px; color: #991b1b; }
+.rec .jb { margin-top: 4px; font-size: 13px; }
+.ojobs { margin-top: 8px; font-size: 13px; background: #f8fafc; border-radius: 10px; padding: 8px 10px; }
+.ojobs div + div { margin-top: 4px; }
+.wk { width: 100%; border-collapse: collapse; font-size: 13px; }
+.wk th, .wk td { padding: 6px 4px; text-align: center; border-bottom: 1px solid #f1f5f9; }
+.wk th:first-child, .wk td:first-child { text-align: left; white-space: nowrap; font-weight: 700; }
+.wk th small { display: block; font-weight: 500; color: var(--muted); }
+.wk td i { font-style: normal; display: inline-block; width: 26px; height: 26px; line-height: 26px; border-radius: 8px; font-weight: 800; font-size: 13px; }
+.wk i.ok { background: #dcfce7; color: #166534; } .wk i.problem { background: #fef3c7; color: #92400e; } .wk i.missing { background: #fee2e2; color: #991b1b; }
+.wk i.waiting { background: #f1f5f9; color: #64748b; } .wk i.off { background: transparent; color: #cbd5e1; } .wk i.before { background: transparent; }
+.wk .today { background: #f0fdfa; }
+.keyrow { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; }
+@media (max-width: 360px) { .tiles4 { gap: 6px; } .tl { padding: 10px 8px; } .tl b { font-size: 22px; } .wk { font-size: 12px; } .wk td i { width: 22px; height: 22px; line-height: 22px; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="row">
+    <span class="brand">
+      <span class="logo"><img src="img/tvs-logo.png" alt="TVS" width="30" height="37"></span>
+      <span class="brand-text">
+        <span class="mark">Daily<em>CHECKS</em></span>
+        <span class="sub"><span data-i18n="plant">TVS Lanka · Horana Assembly Plant</span> <span class="ro" data-i18n="dcViewOnly">VIEW ONLY</span></span>
+      </span>
+    </span>
+    <button class="lang-btn" type="button">සිංහල</button>
+  </div>
+</header>
+
+<main class="wrap" id="out"><div class="loading"><div class="spinner"></div>Loading…</div></main>
+
+<script src="config.js?v=2"></script>
+<script src="common.js?v=4"></script>
+<script src="daily-checks.js?v=1"></script>
+</body>
+</html>

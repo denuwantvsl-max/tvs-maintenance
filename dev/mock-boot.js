@@ -26,6 +26,12 @@
         window.FAKE_GAS.active.insertSheet('Sheet1');
         setup();
         DEMO_DATA.assets.forEach(function (a) { appendObj_('Assets', a); });
+        // operator daily checks: two electric forklifts and the seven delivery lorries (mock only)
+        appendObj_('Assets', { AssetID: 'ST-MM-02', Name: 'Electric forklift 2.5 t (EP, 410 Ah)', Area: 'Material Handling', Location: 'Stores', Category: 'Forklift', Status: 'Active' });
+        appendObj_('Assets', { AssetID: 'ST-MM-03', Name: 'Electric forklift 2.5 t (EP, 280 Ah)', Area: 'Material Handling', Location: 'Stores', Category: 'Forklift', Status: 'Active' });
+        ['LI-3593', 'LI-4765', 'LI-4781', 'LP-8262', 'LP-8290', 'LP-8291', 'LP-9574'].forEach(function (v, i) {
+          appendObj_('Assets', { AssetID: 'ST-LP-0' + (i + 1), Name: 'Lorry lifting platform - vehicle ' + v, Area: 'Delivery Vehicles', Location: 'Vehicle ' + v, Category: 'Vehicle lifting platform', Status: 'Active' });
+        });
         DEMO_DATA.checklist.forEach(function (r) {
           var o = {}; TABLES.ChecklistItems.forEach(function (k, i) { o[k] = r[i] === undefined ? '' : r[i]; }); appendObj_('ChecklistItems', o);
         });

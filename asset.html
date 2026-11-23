@@ -48,6 +48,8 @@
       '<div class="muted">📍 ' + C.esc(a.location || '') + '</div>' +
       (a.status && a.status !== 'Active' ? '<div class="msg err" style="margin-bottom:0">' + C.esc(a.status) + '</div>' : '') + '</div>';
 
+    if (a.opCheck) h += '<a class="btn green" style="margin-bottom:10px" href="check.html?id=' + encodeURIComponent(a.id) + '">✅ ' +
+      C.esc(C.lang() === 'si' ? 'දෛනික පරීක්ෂාව කරන්න' : 'Do the daily check') + '</a>';
     h += '<a class="btn red" href="request.html?asset=' + encodeURIComponent(a.id) + '">🛠️ ' + C.esc(C.t('reportThis')) + '</a>';
 
     if (a.certRequired || a.certExpiry) {
