@@ -2238,6 +2238,7 @@ function opCheckTick_(hour) {
   var byHour = Number(s.OPCHECK_BY_HOUR) || 11;
   if (hour < byHour || hour >= 20 || !isOpWorkday_(now, s)) return;
   var today = dayKey_(now);
+  if (today === props.getProperty('OPCHECK_START')) return; // go-live day: nobody has been told yet
   opGroups_(s).forEach(function (g) {
     var key = 'OPCHECK_MAIL_' + g.id;
     if (props.getProperty(key) === today) return;

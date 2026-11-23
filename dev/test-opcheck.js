@@ -107,6 +107,9 @@ check(sd.machines.length === 7 && sd.machines.find(m => m.id === 'ST-LP-03').tod
 
 // ---- 11:00 email (once a day, only missing machines, working days only) ----
 F.mails.length = 0;
+opCheckTick_(11);
+check(F.mails.length === 0, 'no "not done" email on the go-live day');
+F.props.OPCHECK_START = '2020-01-01';
 opCheckTick_(10);
 check(F.mails.length === 0, 'nothing before 11');
 opCheckTick_(11);
