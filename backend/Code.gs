@@ -2043,11 +2043,12 @@ function nextOpWorkday_(from, s) {
 /** First use: settings rows, the Safety column, the three operator checklists and one daily task per machine. Safe to run again. */
 function ensureOpChecks_() {
   var props = PropertiesService.getScriptProperties();
-  if (props.getProperty('OPCHECK_READY') === '1') return;
+  if (props.getProperty('OPCHECK_READY') === '1' && !opTasksMissing_()) return;
   var lock = LockService.getScriptLock();
   lock.waitLock(25000);
   try {
-    if (props.getProperty('OPCHECK_READY') === '1') return;
+    TABLE_CACHE_ = {};
+    if (props.getProperty('OPCHECK_READY') === '1' && !opTasksMissing_()) return;
     var st = readTable_('Settings', true);
     OPCHECK_SETTINGS.forEach(function (row) {
       if (!find_(st.rows, 'Key', row[0])) appendObj_('Settings', { Key: row[0], Value: row[1], Description: row[2] });
@@ -2092,6 +2093,12 @@ function ensureOpChecks_() {
     if (!props.getProperty('OPCHECK_START')) props.setProperty('OPCHECK_START', dayKey_(now));
     props.setProperty('OPCHECK_READY', '1');
   } finally { lock.releaseLock(); }
+}
+
+/** True when a machine listed in FORKLIFT_ASSETS / DELIVERY_ASSETS (and in the Assets tab) has no daily operator task yet. */
+function opTasksMissing_() {
+  var amap = assetMap_(), tasks = readTable_('PMTasks').rows;
+  return opGroups_().some(function (g) { return g.assets.some(function (aid) { return amap[aid] && !opTask_(aid, tasks); }); });
 }
 
 /** Public: what the operator page needs (machine, checklist, today's checks, names used before). */

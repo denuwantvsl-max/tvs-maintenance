@@ -49,6 +49,18 @@ check(items.filter(r => r.TemplateID === 'CL-34-E').every(r => r.TextSi), 'Sinha
 ensureOpChecks_(); // second run changes nothing
 check(rowsOf('PMTasks').length === tasks.length && rowsOf('ChecklistItems').length === items.length, 'idempotent');
 
+// a lorry added to DELIVERY_ASSETS later gets its daily task on the next page load
+appendObj_('Assets', { AssetID: 'ST-LP-08', Name: 'Lorry lifting platform vehicle LI-4766', Area: 'Delivery Vehicles', Location: 'VEHICLE LI-4766', Status: 'Active' });
+const sx = readTable_('Settings', true);
+setCells_(sx, find_(sx.rows, 'Key', 'DELIVERY_ASSETS'), { Value: 'ST-LP-01,ST-LP-02,ST-LP-03,ST-LP-04,ST-LP-05,ST-LP-06,ST-LP-07,ST-LP-08' });
+TABLE_CACHE_ = {};
+check(ok('opCheck', { id: 'ST-LP-08' }).template.id === 'CL-35-D', 'new lorry set up automatically');
+check(ok('opStatus', { g: 'delivery' }).machines.length === 8, 'new lorry on the leader page');
+check(rowsOf('PMTasks').filter(t => t.AssetID === 'ST-LP-08').length === 1 && rowsOf('ChecklistItems').length === items.length, 'only the task was added');
+const sx2 = readTable_('Settings', true);
+setCells_(sx2, find_(sx2.rows, 'Key', 'DELIVERY_ASSETS'), { Value: 'ST-LP-01,ST-LP-02,ST-LP-03,ST-LP-04,ST-LP-05,ST-LP-06,ST-LP-07' });
+TABLE_CACHE_ = {};
+
 // ---- operator page ----
 const form = ok('opCheck', { id: 'st-mm-02' });
 check(form.group.id === 'forklift' && form.template.id === 'CL-34-E' && form.template.items.length === 21, 'electric form');
