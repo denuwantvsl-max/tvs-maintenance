@@ -122,6 +122,28 @@ if (work) {
 } else {
   check(F.mails.length === 0, 'no email on a day off');
 }
+const n0 = F.mails.length;
+// holidays and a later start date: no "not done" email
+const todayKey = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+const stt = readTable_('Settings', true);
+setCells_(stt, find_(stt.rows, 'Key', 'OPCHECK_HOLIDAYS') || (appendObj_('Settings', { Key: 'OPCHECK_HOLIDAYS' }), find_(readTable_('Settings', true).rows, 'Key', 'OPCHECK_HOLIDAYS')), { Value: todayKey });
+TABLE_CACHE_ = {};
+check(!isOpWorkday_(new Date(), settings_()), 'holiday is not a working day');
+check(ok('opStatus', { g: 'forklift' }).machines.find(m => m.id === 'ST-MM-03').today.state === 'off', 'holiday shows as day off');
+F.props.OPCHECK_MAIL_forklift = ''; F.props.OPCHECK_MAIL_delivery = '';
+opCheckTick_(12);
+check(F.mails.length === n0, 'no email on a holiday');
+const st2 = readTable_('Settings', true);
+setCells_(st2, find_(st2.rows, 'Key', 'OPCHECK_HOLIDAYS'), { Value: '' });
+appendObj_('Settings', { Key: 'OPCHECK_START', Value: '2099-01-01' });
+TABLE_CACHE_ = {};
+opCheckTick_(12);
+check(F.mails.length === n0, 'no email before the start date');
+check(ok('opStatus', { g: 'forklift' }).machines.find(m => m.id === 'ST-MM-03').today.state === 'before', 'before start shown as not started');
+const st3 = readTable_('Settings', true);
+setCells_(st3, find_(st3.rows, 'Key', 'OPCHECK_START'), { Value: '' });
+TABLE_CACHE_ = {};
+if (work) { F.props.OPCHECK_MAIL_forklift = todayKey; F.props.OPCHECK_MAIL_delivery = todayKey; }
 const n = F.mails.length;
 opCheckTick_(12);
 check(F.mails.length === n, 'only once a day');

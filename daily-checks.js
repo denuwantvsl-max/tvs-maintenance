@@ -29,7 +29,9 @@
     dcKeyMs: ['✗ not done', '✗ කර නැත'],
     dcNoTask: ['Daily check not set up for this machine.', 'මෙම යන්ත්‍රයට දෛනික පරීක්ෂාව සකසා නැත.'],
     dcNoGroup: ['Open this page with ?g=forklift or ?g=delivery', 'මෙම පිටුව ?g=forklift හෝ ?g=delivery සමඟ විවෘත කරන්න'],
+    dcNotStarted: ['Not started yet', 'තවම ආරම්භ කර නැත'],
     dcBefore: ['Before the daily checks started', 'දෛනික පරීක්ෂා ආරම්භ කිරීමට පෙර'],
+    dcStarts: ['Daily checks start on {d}.', 'දෛනික පරීක්ෂා {d} දින ආරම්භ වේ.'],
     dcRemarks: ['Remarks', 'සටහන්'],
     dcPhoto: ['photo', 'ඡායාරූපය']
   });
@@ -42,7 +44,7 @@
 
   function fill(s, o) { return String(s).replace(/\{(\w+)\}/g, function (m, k) { return o[k] === undefined ? m : o[k]; }); }
   function hhmm(iso) { var d = new Date(iso); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
-  var STATE = { ok: 'dcDone', problem: 'dcProblem', missing: 'dcMissing', waiting: 'dcWaiting', off: 'dcOff', before: 'dcBefore' };
+  var STATE = { ok: 'dcDone', problem: 'dcProblem', missing: 'dcMissing', waiting: 'dcWaiting', off: 'dcOff', before: 'dcNotStarted' };
   var ICON = { ok: '✓', problem: '!', missing: '✗', waiting: '·', off: '–', before: '' };
 
   function load() {
@@ -64,7 +66,8 @@
     h += '<div class="tiles4"><div class="tl ok"><b>' + done + '<small style="font-size:14px;color:var(--muted)"> / ' + c.total + '</small></b><span>' + esc(t('dcDone').split(' –')[0]) + '</span></div>' +
       '<div class="tl pb"><b>' + c.problem + '</b><span>' + esc(t('dcProblem')) + '</span></div>' +
       '<div class="tl ' + (c.missing ? 'ms' : 'wt') + '"><b>' + (c.missing + notYet) + '</b><span>' + esc(t(c.missing ? 'dcMissing' : 'dcWaiting')) + '</span></div></div>';
-    if (!x.workday) h += '<div class="dl info">' + esc(t('dcNotWorkday')) + '</div>';
+    if (x.startDay && x.days[x.days.length - 1].date < x.startDay) h += '<div class="dl info">' + esc(fill(t('dcStarts'), { d: C.fmtDate(x.startDay + 'T12:00:00', false) })) + '</div>';
+    else if (!x.workday) h += '<div class="dl info">' + esc(t('dcNotWorkday')) + '</div>';
     else if (c.missing) h += '<div class="dl bad">⏰ ' + esc(fill(t('dcLateMissing'), { n: c.missing, h: x.byHour })) + '</div>';
     else if (notYet) h += '<div class="dl info">' + esc(fill(t('dcDueBy'), { n: notYet, h: x.byHour })) + '</div>';
     else h += '<div class="dl good">✓ ' + esc(t('dcAllDone')) + '</div>';

@@ -1918,7 +1918,9 @@ var OPCHECK_SETTINGS = [
   ['DELIVERY_ASSETS', 'ST-LP-01,ST-LP-02,ST-LP-03,ST-LP-04,ST-LP-05,ST-LP-06,ST-LP-07', 'Delivery vehicles (lorry + lifting platform) checked every working day by their drivers'],
   ['DELIVERY_LEADER_EMAIL', 'arunaw@tvsauto.lk', 'Delivery in charge: gets delivery-vehicle daily-check problems and the "not done" email (comma separated)'],
   ['OPCHECK_BY_HOUR', '11', 'Operator daily checks must be done by this hour (24 h clock); the "not done" email goes out after it'],
-  ['OPCHECK_DAYS', 'Mon,Tue,Wed,Thu,Fri,Sat', 'Working days for operator daily checks']
+  ['OPCHECK_DAYS', 'Mon,Tue,Wed,Thu,Fri,Sat', 'Working days for operator daily checks'],
+  ['OPCHECK_HOLIDAYS', '', 'Holidays with no operator daily check (yyyy-MM-dd, comma separated, e.g. 2026-11-24,2026-12-25)'],
+  ['OPCHECK_START', '', 'First day the operator daily checks count (yyyy-MM-dd); no "not done" email before it']
 ];
 
 /** Operator checklists: [ItemNo, Section, Text, TextSi, Safety]. Safety = the machine must not be used when Not OK. */
@@ -2020,8 +2022,16 @@ function opTask_(assetId, tasks) {
 }
 function dayKey_(d) { return Utilities.formatDate(d instanceof Date ? d : new Date(dateNum_(d)), TZ, 'yyyy-MM-dd'); }
 function isOpWorkday_(d, s) {
-  var days = list_((s || settings_()).OPCHECK_DAYS).map(function (x) { return x.slice(0, 3).toLowerCase(); });
+  s = s || settings_();
+  if (list_(s.OPCHECK_HOLIDAYS).indexOf(Utilities.formatDate(d, TZ, 'yyyy-MM-dd')) >= 0) return false;
+  var days = list_(s.OPCHECK_DAYS).map(function (x) { return x.slice(0, 3).toLowerCase(); });
   return days.indexOf(Utilities.formatDate(d, TZ, 'EEE').toLowerCase()) >= 0;
+}
+/** First day the checks count: Settings OPCHECK_START, else the go-live day. */
+function opStartDay_(s) {
+  var v = String((s || settings_()).OPCHECK_START || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  return PropertiesService.getScriptProperties().getProperty('OPCHECK_START') || '';
 }
 /** Start of the next working day after `from`. */
 function nextOpWorkday_(from, s) {
@@ -2176,7 +2186,7 @@ function apiOpStatus_(p) {
   var recs = readTable_('PMRecords').rows.filter(function (r) { return r.RecordID && dateNum_(r.DoneAt) >= first; });
   var wos = readTable_('WorkOrders').rows;
   var today = days[days.length - 1];
-  var startDay = PropertiesService.getScriptProperties().getProperty('OPCHECK_START') || '';
+  var startDay = opStartDay_(s);
   var machines = g.assets.map(function (aid) {
     var a = amap[aid] || {}, t = opTask_(aid, tasks);
     var mine = recs.filter(function (r) { return t && String(r.TaskID) === String(t.TaskID); })
@@ -2207,7 +2217,7 @@ function apiOpStatus_(p) {
   });
   var cnt = function (st) { return machines.filter(function (m) { return m.today.state === st; }).length; };
   return {
-    group: { id: g.id, title: g.title, titleSi: g.titleSi }, now: iso_(now), byHour: byHour, workday: today.workday, days: days,
+    group: { id: g.id, title: g.title, titleSi: g.titleSi }, now: iso_(now), byHour: byHour, workday: today.workday, days: days, startDay: startDay,
     machines: machines, counts: { total: machines.length, ok: cnt('ok'), problem: cnt('problem'), missing: cnt('missing'), waiting: cnt('waiting'), off: cnt('off') },
     checkUrl: s.APP_URL + 'check.html?id='
   };
@@ -2239,6 +2249,8 @@ function opCheckTick_(hour) {
   if (hour < byHour || hour >= 20 || !isOpWorkday_(now, s)) return;
   var today = dayKey_(now);
   if (today === props.getProperty('OPCHECK_START')) return; // go-live day: nobody has been told yet
+  var startDay = opStartDay_(s);
+  if (startDay && today < startDay) return; // checks have not started yet
   opGroups_(s).forEach(function (g) {
     var key = 'OPCHECK_MAIL_' + g.id;
     if (props.getProperty(key) === today) return;
