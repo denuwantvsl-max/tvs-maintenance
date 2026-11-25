@@ -38,6 +38,8 @@
     chkProblems: ['{n} problem(s) recorded. The maintenance team has been told.', 'ගැටලු {n} ක් සටහන් විය. නඩත්තු කණ්ඩායමට දන්වා ඇත.'],
     chkJob: ['Maintenance job', 'නඩත්තු රැකියා අංකය'],
     chkCheckAgain: ['Do another check', 'නැවත පරීක්ෂා කරන්න'],
+    chkMeterNote: ['The hour meter number looks wrong, so it was not used. The maintenance team will check it.', 'පැය මීටර අංකය වැරදි ලෙස පෙනේ, එබැවින් එය භාවිතා නොකළේය. නඩත්තු කණ්ඩායම එය පරීක්ෂා කරයි.'],
+    chkPractice: ['PRACTICE ONLY – nothing is saved. Use the QR label on the machine for the real check.', 'පුහුණුව සඳහා පමණි – කිසිවක් සුරැකෙන්නේ නැත. සැබෑ පරීක්ෂාවට යන්ත්‍රයේ ඇති QR ලේබලය භාවිතා කරන්න.'],
     chkSunday: ['Today is not a working day, but you can still record a check.', 'අද වැඩ කරන දිනයක් නොවේ, නමුත් ඔබට පරීක්ෂාවක් සටහන් කළ හැක.']
   });
 
@@ -68,7 +70,7 @@
 
   function machineCard() {
     var x = S.x, a = x.asset;
-    var h = '<div class="card"><div class="mach">' + (a.photoUrl ? '<img src="' + esc(a.photoUrl) + '" alt="">' : '') +
+    var h = (C.isMock() ? '<div class="msg" style="background:#fef3c7;color:#92400e;border-color:#fde68a;font-weight:700">🧪 ' + esc(t('chkPractice')) + '</div>' : '') + '<div class="card"><div class="mach">' + (a.photoUrl ? '<img src="' + esc(a.photoUrl) + '" alt="">' : '') +
       '<div><div class="muted small">' + esc(t('chkTitle')) + ' · ' + esc(C.lang() === 'si' ? x.group.titleSi : x.group.title) + '</div>' +
       '<div class="id">' + esc(a.id) + '</div><div class="nm">' + esc(a.name) + '</div>' +
       (a.location ? '<div class="muted small">📍 ' + esc(a.location) + '</div>' : '') + '</div></div>';
@@ -208,6 +210,7 @@
     var h = '<div class="card donebox"><div class="big">' + (r.unsafe && r.unsafe.length ? '⛔' : r.notOk ? '⚠️' : '✅') + '</div>' +
       '<h2>' + esc(fill(t('chkThanks'), { n: opName() })) + '</h2>' +
       '<div class="muted">' + esc(S.x.asset.id + ' · ' + S.x.asset.name) + ' · ' + esc(C.fmtDate(new Date().toISOString())) + '</div>';
+    if (r.meterNote) h += '<div class="msg info">' + esc(t('chkMeterNote')) + '</div>';
     if (!r.notOk) h += '<div class="msg ok">' + esc(t('chkAllOk')) + '</div>';
     else {
       h += '<div class="msg err">' + esc(fill(t('chkProblems'), { n: r.notOk })) +

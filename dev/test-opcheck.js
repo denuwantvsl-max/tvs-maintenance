@@ -88,8 +88,16 @@ check(dateNum_(t2.NextDue) > Date.now() && isOpWorkday_(new Date(dateNum_(t2.Nex
 // diesel forklift: hour meter optional, wild values refused
 const fd = ok('opCheck', { id: 'ST-MM-01' });
 check(fd.template.id === 'CL-34-D' && fd.asset.meterUnit === 'h', 'diesel form with hour meter');
-fails('opCheckSave', { data: { assetId: 'ST-MM-01', name: 'Sunil', results: all(fd.template, 'ok'), meter: 44100 } }, /too high/);
-fails('opCheckSave', { data: { assetId: 'ST-MM-01', name: 'Sunil', results: all(fd.template, 'ok'), meter: 4400 } }, /lower/);
+// a doubtful hour meter never blocks the check: saved, meter not used, managers told
+F.telegram.length = 0;
+const rHigh = ok('opCheckSave', { data: { assetId: 'ST-MM-01', name: 'Sunil', results: all(fd.template, 'ok'), meter: 44100 } });
+check(rHigh.meterNote === 1 && Number(find_(rowsOf('Assets'), 'AssetID', 'ST-MM-01').CurrentMeter) === 4410, 'too high: saved, meter kept');
+check(/not used/.test(rowsOf('PMRecords').find(r => r.RecordID === rHigh.recordId).Remarks) && F.telegram.length >= 1, 'note + manager alert');
+const rLow = ok('opCheckSave', { data: { assetId: 'ST-MM-01', name: 'Sunil', results: all(fd.template, 'ok'), meter: 4400 } });
+check(rLow.meterNote === 1 && Number(find_(rowsOf('Assets'), 'AssetID', 'ST-MM-01').CurrentMeter) === 4410, 'lower: saved, meter kept');
+const recFix = readTable_('PMRecords', true); // take these two out so the "today" counts below stay as before
+[rHigh.recordId, rLow.recordId].forEach(id => setCells_(recFix, find_(recFix.rows, 'RecordID', id), { RecordID: '', TaskID: '' }));
+TABLE_CACHE_ = {};
 F.mails.length = 0;
 const r2 = ok('opCheckSave', { data: { assetId: 'ST-MM-01', name: 'Sunil', results: all(fd.template, 'ok'), meter: 4416 } });
 check(!r2.woId && r2.notOk === 0 && F.mails.length === 0, 'all OK: no job, no email');

@@ -42,7 +42,7 @@
         });
         var at = readTable_('Assets', true);
         setCells_(at, find_(at.rows, 'AssetID', 'EN-CA-01'), { MeterUnit: 'h', CurrentMeter: 2985 });
-        setCells_(at, find_(at.rows, 'AssetID', 'ST-MM-01'), { MeterUnit: 'h', CurrentMeter: 4410 });
+        setCells_(at, find_(at.rows, 'AssetID', 'ST-MM-01'), { MeterUnit: 'h', CurrentMeter: 7922, MeterUpdated: new Date(Date.now() - 8 * 86400000) });
         seedDemoReadings();
         var ut = readTable_('Users', true);
         ut.rows.forEach(function (u) { setCells_(ut, u, { NewPIN: DEMO_DATA.pins[u.UserID] }); });

@@ -957,17 +957,21 @@ function completePm_(byName, d, opts) {
       if (missing) throw userError_('Please answer all items (' + missing + ' not answered).');
       if (noNote) throw userError_('Please write what is wrong for each Not OK item.');
     }
-    var remarks = clean_(d.remarks, 1000);
+    var remarks = clean_(d.remarks, 1000), remarksMeter = '';
     var contractor = op ? '' : clean_(d.contractor, 100);
     if (!tpl && !remarks && !contractor) throw userError_('Please write what was done (or the contractor name).');
     var meter = num_(d.meter);
+    // operators: a doubtful hour meter never stops the safety check – the check is saved, the meter is not used, managers are told
+    var meterOdd = '';
     if (meter !== '' && asset && String(asset.CurrentMeter) !== '' && meter < Number(asset.CurrentMeter)) {
-      throw userError_('Meter reading is lower than the last reading (' + asset.CurrentMeter + ').');
+      if (!op) throw userError_('Meter reading is lower than the last reading (' + asset.CurrentMeter + ').');
+      meterOdd = 'lower than the last reading ' + asset.CurrentMeter;
     }
-    if (op && meter !== '' && asset && String(asset.CurrentMeter) !== '') {
+    if (op && !meterOdd && meter !== '' && asset && String(asset.CurrentMeter) !== '') {
       var daysSince = asset.MeterUpdated ? Math.max(1, Math.ceil((now.getTime() - dateNum_(asset.MeterUpdated)) / 86400000)) : 30;
-      if (meter > Number(asset.CurrentMeter) + daysSince * 24) throw userError_('Hour meter reading looks too high (last reading ' + asset.CurrentMeter + '). Please check it.');
+      if (meter > Number(asset.CurrentMeter) + daysSince * 24) meterOdd = 'more than ' + (daysSince * 24) + ' h above the last reading ' + asset.CurrentMeter;
     }
+    if (meterOdd) remarksMeter = 'Hour meter ' + meter + ' not used (' + meterOdd + ') - please check.';
     if (!op && asset && asset.MeterUnit && t.MeterInterval && meter === '') throw userError_('Please enter the hour meter reading.');
 
     var rt = readTable_('PMRecords', true);
@@ -975,7 +979,7 @@ function completePm_(byName, d, opts) {
     var seq = rt.rows.filter(function (r) { return String(r.RecordID).indexOf(prefix) === 0; }).length + 1;
     rec = {
       RecordID: prefix + ('00' + seq).slice(-3), TaskID: t.TaskID, AssetID: t.AssetID, TemplateID: t.TemplateID || '', Title: t.Title,
-      DoneAt: now, DoneBy: byName, Meter: meter, OkCount: ok, NotOkCount: notOk.length, Remarks: remarks, Contractor: contractor,
+      DoneAt: now, DoneBy: byName, Meter: meter, OkCount: ok, NotOkCount: notOk.length, Remarks: [remarks, remarksMeter].filter(String).join('\n'), Contractor: contractor,
       Cost: op ? '' : num_(d.cost),
       Results: tpl ? JSON.stringify({ doc: tpl.docNo, title: tpl.title, items: tpl.items.map(function (i) { return [i.no, i.section || '', i.text, i.type, i.unit || '']; }),
         children: children, values: values, notes: notes, by: op ? 'operator' : 'staff' }) : ''
@@ -1004,9 +1008,9 @@ function completePm_(byName, d, opts) {
     var ch = { LastDone: now, Updated: now };
     if (op) ch.NextDue = nextOpWorkday_(now, s);
     else if (t.FreqUnit) ch.NextDue = addPeriod_(now, t.FreqUnit, t.FreqValue);
-    if (meter !== '' && t.MeterInterval) ch.LastMeter = meter;
+    if (meter !== '' && t.MeterInterval && !meterOdd) ch.LastMeter = meter;
     setCells_(tt, t, ch);
-    if (meter !== '' && asset) setCells_(at, asset, { CurrentMeter: meter, MeterUpdated: now });
+    if (meter !== '' && asset && !meterOdd) setCells_(at, asset, { CurrentMeter: meter, MeterUpdated: now });
   } finally {
     lock.releaseLock();
   }
@@ -1024,7 +1028,11 @@ function completePm_(byName, d, opts) {
   if (op && notOk.length && opts.group) {
     try { opProblemMail_(opts.group, asset, rec, notOk, unsafe, wo, s); } catch (err) { logError_('opProblemMail', err); }
   }
-  return { recordId: rec.RecordID, woId: wo ? wo.WO_ID : '', notOk: rec.NotOkCount, ok: rec.OkCount, unsafe: unsafe };
+  if (remarksMeter) {
+    notifyRoles_(MANAGER_ROLES, '🔢 <b>' + esc_(rec.AssetID) + ' – hour meter to check</b>\n' + esc_(remarksMeter) + '\n👷 ' + esc_(byName) +
+      ' (daily check ' + rec.RecordID + ')\nIf the new number is right, correct the hour meter of this machine in the app.');
+  }
+  return { recordId: rec.RecordID, woId: wo ? wo.WO_ID : '', notOk: rec.NotOkCount, ok: rec.OkCount, unsafe: unsafe, meterNote: remarksMeter ? 1 : 0 };
 }
 
 function apiPmSave_(p) {
