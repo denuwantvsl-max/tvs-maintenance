@@ -245,9 +245,8 @@
   function showTab(name) {
     document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-tab') === name); });
     if (name === 'labels') document.querySelector('#tabs [data-tab="assets"]').classList.add('on');
-    ['jobs', 'pm', 'readings', 'mrm', 'assets', 'dash', 'labels', 'me'].forEach(function (n) { $('tab-' + n).classList.toggle('hidden', n !== name); });
+    ['jobs', 'pm', 'readings', 'assets', 'dash', 'labels', 'me'].forEach(function (n) { $('tab-' + n).classList.toggle('hidden', n !== name); });
     if (name === 'readings') loadReadings();
-    if (name === 'mrm') loadMrm();
     if (name === 'pm') { renderPmViews(); loadPm(); }
     if (name === 'assets') loadAssets().then(renderAssets);
     if (name === 'dash') loadDash();
@@ -311,7 +310,6 @@
   });
   function route() {
     var h = location.hash.replace(/^#/, '');
-    if (h === 'mrm') { history.replaceState(null, '', location.pathname + location.search); closeSheet(); showTab('mrm'); return; }
     if (h === 'readings') { history.replaceState(null, '', location.pathname + location.search); closeSheet(); showTab('readings'); return; }
     var rd = /^reading=(.+)$/.exec(h);
     if (rd) { showTab('readings'); openReading(decodeURIComponent(rd[1]).toUpperCase()); return; }
@@ -1032,38 +1030,6 @@
   });
 
   /* ---------------- daily readings (generator, compressor, water) ---------------- */
-  /* ---------------- General MRM (monthly plant meeting): pending actions, read only here ---------------- */
-  C.addDict({
-    tabMrm: ['MRM', 'MRM'],
-    mrmTitle: ['General MRM – pending work', 'සාමාන්‍ය MRM – ඉතිරි වැඩ'],
-    mrmLead: ['Action items from the monthly plant management review. Updates are made in the meeting page.', 'මාසික කම්හල් කළමනාකරණ සමාලෝචනයේ ක්‍රියා අයිතම. යාවත්කාලීන කිරීම් රැස්වීම් පිටුවේ සිදු කෙරේ.'],
-    mrmOpen: ['Open the meeting page', 'රැස්වීම් පිටුව විවෘත කරන්න'],
-    mrmKOpen: ['Open', 'විවෘත'], mrmKOverdue: ['Overdue', 'ප්‍රමාද'], mrmKCritical: ['Critical', 'ඉතා වැදගත්'], mrmKLast: ['Last meeting', 'අවසන් රැස්වීම'],
-    mrmNone: ['Nothing pending.', 'ඉතිරි වැඩ නැත.'], mrmCarried: ['carried', 'කල් දැමූ'], mrmDone: ['Recently closed', 'මෑතදී වසා දැමූ']
-  });
-  function loadMrm() {
-    var box = $('tab-mrm');
-    box.innerHTML = C.loadingHtml();
-    return C.api('mrmHome').then(function (d) {
-      var s = d.stats, open = d.actions.filter(function (a) { return a.open; });
-      var closed = d.actions.filter(function (a) { return !a.open && a.doneAt; }).sort(function (a, b) { return b.doneAt.localeCompare(a.doneAt); }).slice(0, 5);
-      var sev = { critical: 'p0', high: 'p1', medium: 'p2', low: '' };
-      var card = function (a) {
-        return '<a class="item ' + (sev[a.severity] || '') + '" href="general-mrm.html" style="text-decoration:none;color:inherit"><div class="top"><span class="id">' + esc(a.id) + '</span>' +
-          (a.overdue ? '<span class="pill badge-late">' + esc(t('late')) + '</span>' : '') + '<span class="pill">' + esc(a.severity) + '</span>' +
-          (a.carried >= 2 ? '<span class="pill">' + esc(t('mrmCarried')) + ' ×' + a.carried + '</span>' : '') + (a.status === 'In progress' ? '<span class="pill st-IN_PROGRESS">' + esc(a.status) + '</span>' : '') + '</div>' +
-          '<div class="ttl">' + esc(a.item) + '</div><div class="meta">👤 ' + esc(a.owner || '—') + ' · 📅 ' + esc(a.target || '—') + (a.progress ? ' · ' + esc(a.progress) : '') + '</div></a>';
-      };
-      box.innerHTML = '<h2 style="margin-top:4px">' + esc(t('mrmTitle')) + '</h2><p class="muted small">' + esc(t('mrmLead')) + '</p>' +
-        '<div class="kpis">' + [[t('mrmKOpen'), s.open, false], [t('mrmKOverdue'), s.overdue, s.overdue > 0], [t('mrmKCritical'), s.critical, s.critical > 0], [t('mrmKLast'), s.lastMeeting ? C.fmtDate(s.lastMeeting, false) : '—', false]].map(function (k) {
-          return '<div class="kpi' + (k[2] ? ' alert' : '') + '"><b>' + esc(k[1]) + '</b><span>' + esc(k[0]) + '</span></div>';
-        }).join('') + '</div>' +
-        '<div class="btn-row" style="margin:12px 0"><a class="btn dark" href="general-mrm.html">📝 ' + esc(t('mrmOpen')) + '</a></div>' +
-        '<div class="list">' + (open.length ? open.map(card).join('') : '<div class="muted center" style="padding:24px">' + esc(t('mrmNone')) + '</div>') + '</div>' +
-        (closed.length ? '<h3 style="margin-top:18px">' + esc(t('mrmDone')) + '</h3><div class="list">' + closed.map(card).join('') + '</div>' : '');
-    }).catch(function (e) { handleErr(e, box); });
-  }
-
   C.addDict({
     tabReadings: ['Readings', 'කියවීම්'],
     rdTitle: ['Daily readings', 'දෛනික කියවීම්'],
