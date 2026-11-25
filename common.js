@@ -141,8 +141,13 @@
   }
 
   /* ---------- API ---------- */
-  var MOCK = /[?&]mock=1\b/.test(location.search) || store.get('cmms_mock', sessionStorage) === '1';
-  if (MOCK) store.set('cmms_mock', '1', sessionStorage);
+  // Practice / demo data only when the link itself says mock=1. On the live site a practice link must never "stick":
+  // a real QR scanned later in the same browser tab has to open the real system. (Only on this PC, localhost, the
+  // flag is kept between pages for testing.)
+  var LOCAL = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  var MOCK = /[?&]mock=1\b/.test(location.search) || (LOCAL && store.get('cmms_mock', sessionStorage) === '1');
+  if (MOCK && LOCAL) store.set('cmms_mock', '1', sessionStorage);
+  if (!MOCK) store.del('cmms_mock', sessionStorage);
 
   function loadScript(src) {
     return new Promise(function (res, rej) {
