@@ -4,6 +4,7 @@
  * Phase 1: asset register, public QR asset pages, work orders, Telegram + email alerts.
  * Phase 2: preventive maintenance, digital checklists. Phase 2b: bills / costs, Telegram chat assistant (Gemini).
  * Phase 2c: daily readings (generator, compressor, water meter) read from a photo by the AI, diesel refills.
+ * Phase 2e: General MRM (monthly plant meeting) – public page general-mrm.html, MRM tab in the staff app.
  * Phase 2d: operator daily checks (forklifts, delivery vehicles) by QR without a PIN, leader status pages, 11:00 email.
  *
  * Secrets live ONLY in Script Properties (Project Settings > Script Properties):
@@ -45,6 +46,11 @@ var TABLES = {
     'Photos', 'PhotoUntil', 'By', 'Note', 'Created'],
   FuelLog: ['RefillID', 'Date', 'AssetID', 'Litres', 'Hours', 'FuelBefore', 'FuelAfter', 'Photos', 'PhotoUntil', 'By', 'Note', 'Exclude', 'Created'],
   GenRuns: ['RunID', 'StartAt', 'StopAt', 'Reason', 'HoursStart', 'HoursStop', 'FuelStart', 'FuelStop', 'By', 'Note', 'Created'],
+  MrmMeetings: ['MeetingID', 'Date', 'Title', 'Chair', 'Attendees', 'Agenda', 'Minutes', 'Decisions', 'NextDate', 'Status', 'MomFileId',
+    'Active', 'Created', 'Updated'],
+  MrmActions: ['ActionID', 'MeetingID', 'Item', 'Category', 'Owner', 'Target', 'Severity', 'Status', 'Carried', 'Progress', 'History',
+    'DoneAt', 'Active', 'Created', 'Updated'],
+  MrmLog: ['Timestamp', 'Action', 'ID', 'Detail'],
   Settings: ['Key', 'Value', 'Description'],
   Errors: ['Timestamp', 'Action', 'Message', 'Stack']
 };
@@ -60,7 +66,9 @@ var TEXT_COLUMNS = {
   Expenses: ['ExpenseID', 'BillNo', 'AssetID', 'WO_ID'],
   Readings: ['ReadingID', 'Date', 'Time', 'Point', 'AssetID', 'PhotoUntil'],
   FuelLog: ['RefillID', 'Date', 'AssetID', 'PhotoUntil'],
-  GenRuns: ['RunID', 'StartAt', 'StopAt', 'Reason']
+  GenRuns: ['RunID', 'StartAt', 'StopAt', 'Reason'],
+  MrmMeetings: ['MeetingID', 'Date', 'NextDate', 'MomFileId'],
+  MrmActions: ['ActionID', 'MeetingID', 'Target', 'DoneAt']
 };
 
 var DEFAULT_SETTINGS = [
@@ -158,7 +166,10 @@ var ROUTES = {
   refillSave: apiRefillSave_,
   opCheck: apiOpCheck_,
   opCheckSave: apiOpCheckSave_,
-  opStatus: apiOpStatus_
+  opStatus: apiOpStatus_,
+  mrmHome: apiMrmHome_,
+  mrmActionSave: apiMrmActionSave_,
+  mrmMeetingSave: apiMrmMeetingSave_
 };
 
 /* =========================================================================
@@ -3495,4 +3506,204 @@ function userName_(id, users) {
   if (!id) return '';
   var u = find_(users || readTable_('Users').rows, 'UserID', String(id));
   return u ? u.Name : String(id);
+}
+
+/* =========================================================================
+ * General MRM (monthly plant management review meeting) – Phase 2e
+ * Public page general-mrm.html (no PIN, used by Denuwan): meetings, minutes, action items with follow-up.
+ * The staff app shows the pending items in its "MRM" tab. Nothing is ever hard-deleted: actions are set to
+ * "Dropped", meetings to Active = No, and every change is written to MrmLog.
+ * ========================================================================= */
+
+var MRM_STATUSES = ['Open', 'In progress', 'Done', 'Dropped'];
+var MRM_SEVERITIES = ['critical', 'high', 'medium', 'low'];
+
+function ensureMrm_() {
+  var ss = db_(), props = PropertiesService.getScriptProperties();
+  if (props.getProperty('MRM_READY') && ss.getSheetByName('MrmMeetings') && ss.getSheetByName('MrmActions') && ss.getSheetByName('MrmLog')) return;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    ['MrmMeetings', 'MrmActions', 'MrmLog'].forEach(function (name) {
+      if (ss.getSheetByName(name)) return;
+      var sh = ss.insertSheet(name), want = TABLES[name];
+      sh.getRange(1, 1, 1, want.length).setValues([want]).setFontWeight('bold').setBackground('#1c2126').setFontColor('#f2b705');
+      sh.setFrozenRows(1);
+      (TEXT_COLUMNS[name] || []).forEach(function (h) { sh.getRange(2, want.indexOf(h) + 1, Math.max(sh.getMaxRows() - 1, 1), 1).setNumberFormat('@'); });
+      delete TABLE_CACHE_[name];
+    });
+    var now = new Date();
+    if (!readTable_('MrmMeetings', true).rows.some(function (r) { return r.MeetingID; })) {
+      [['GM-0001', '2025-05-17', '1DNIP43dNb2F5Yp7n9JMjjsR4R-Ipd34c'], ['GM-0002', '2025-07-16', '1hGZCj1jp2e2pSza4_WFhzjE0HA5hIUke'],
+        ['GM-0003', '2025-08-18', '1o0r-rLNwgXxF8Ip0ymWT6h4qYv_E7Icw'], ['GM-0004', '2025-09-08', '1G_1h53GCE-tseHStu6Kf9FAqDqsv_JwH'],
+        ['GM-0005', '2025-09-23', '13suRCm5fC6G4Qlh00wYxaB-_aLSr7XoO'], ['GM-0006', '2025-09-29', '1_3P6WSuxFkJCgMkNHSMNT9le7jL5dVh9']
+      ].forEach(function (m) {
+        appendObj_('MrmMeetings', { MeetingID: m[0], Date: m[1], Title: 'Monthly MRM', Status: 'Final', MomFileId: m[2],
+          Minutes: 'Minutes of meeting (MOM) kept as a PDF on Drive.', Active: 'Yes', Created: now, Updated: now });
+      });
+    }
+    if (!readTable_('MrmActions', true).rows.some(function (r) { return r.ActionID; })) {
+      [['Water line connection', '8.5.4 Utilities', 'Malindu / Denuwan', '2026-07-22', 'critical', 4],
+        ['PVC fume ducting — 3W', 'Ventilation', 'Hirushan', '2026-07-22', 'critical', 4],
+        ['CKD washroom arrangement', 'Infrastructure', 'Denuwan / Hirushan', '2026-07-22', 'critical', 4],
+        ['NIOSH exhaust ducts — generator & CKD', 'Environmental', 'Hirushan', '2026-07-22', 'critical', 4],
+        ['Fire extinguisher foam cart covers', 'Fire Safety', 'Hirushan', '2026-07-22', 'critical', 0],
+        ['Washroom drainage repair', 'Infrastructure', 'Hirushan', '2026-07-30', 'high', 0],
+        ['Rainwater at fire pump house', 'Infrastructure', 'Hirushan', '2026-07-30', 'high', 0],
+        ['Pallet jack repair', 'Maintenance', 'Hirushan / Denuwan', '2026-07-22', 'high', 0],
+        ['Petroleum supplier registration', 'Procurement', 'Denuwan / Shantha', '2026-07-31', 'high', 0],
+        ['Paint booth fans', 'Maintenance', 'Kalpa / Hirushan', '2026-07-31', 'medium', 0],
+        ['Broken fans repair', 'Maintenance', 'Hirushan', '2026-07-22', 'medium', 0],
+        ['Mungama warehouse gutter covering', 'Infrastructure', 'Malindu / Hirushan', '2026-07-31', 'medium', 0],
+        ['Transit-damage part zone signage', '5S / Visual Mgmt', 'Nilantha', '2026-07-31', 'medium', 0]
+      ].forEach(function (a, i) {
+        appendObj_('MrmActions', { ActionID: 'MA-' + ('000' + (i + 1)).slice(-4), MeetingID: '', Item: a[0], Category: a[1], Owner: a[2],
+          Target: a[3], Severity: a[4], Status: 'Open', Carried: a[5],
+          Progress: a[5] ? 'Unresolved across 4 MRM cycles: find the root cause instead of moving the date again.' : '',
+          History: '2026-07-15: raised / carried at the July 2026 MRM cycle (status update pending)', Active: 'Yes', Created: now, Updated: now });
+      });
+    }
+    props.setProperty('MRM_READY', '1');
+  } finally { lock.releaseLock(); }
+}
+
+function mrmDay_(v) {
+  if (v instanceof Date) return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, TZ, 'yyyy-MM-dd');
+  var s = clean_(v, 20);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
+}
+
+function mrmNextId_(rows, key, prefix) {
+  var max = 0;
+  rows.forEach(function (r) { var id = String(r[key] || ''); if (id.indexOf(prefix) === 0) max = Math.max(max, Number(id.slice(prefix.length)) || 0); });
+  return prefix + ('000' + (max + 1)).slice(-4);
+}
+
+function mrmLog_(action, id, detail) {
+  appendObj_('MrmLog', { Timestamp: new Date(), Action: action, ID: id, Detail: short_(detail, 1000) });
+}
+
+function mrmActionOut_(a, today) {
+  var target = mrmDay_(a.Target), status = String(a.Status || 'Open');
+  var open = status === 'Open' || status === 'In progress';
+  return { id: String(a.ActionID), meetingId: String(a.MeetingID || ''), item: String(a.Item || ''), category: String(a.Category || ''),
+    owner: String(a.Owner || ''), target: target, severity: String(a.Severity || 'medium'), status: status, open: open,
+    overdue: open && !!target && target < today, carried: Number(a.Carried) || 0, progress: String(a.Progress || ''),
+    history: String(a.History || ''), doneAt: mrmDay_(a.DoneAt), updated: iso_(a.Updated) };
+}
+
+function mrmMeetingOut_(m) {
+  var fid = String(m.MomFileId || '');
+  return { id: String(m.MeetingID), date: mrmDay_(m.Date), title: String(m.Title || ''), chair: String(m.Chair || ''),
+    attendees: String(m.Attendees || ''), agenda: String(m.Agenda || ''), minutes: String(m.Minutes || ''),
+    decisions: String(m.Decisions || ''), nextDate: mrmDay_(m.NextDate), status: String(m.Status || 'Draft'),
+    momUrl: fid ? 'https://drive.google.com/file/d/' + fid + '/view' : '', updated: iso_(m.Updated) };
+}
+
+/** PUBLIC: everything the General MRM page and the staff app's MRM tab need. */
+function apiMrmHome_(p) {
+  ensureMrm_();
+  var today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  var sevRank = { critical: 0, high: 1, medium: 2, low: 3 };
+  var actions = readTable_('MrmActions').rows.filter(function (a) { return a.ActionID && isActive_(a); })
+    .map(function (a) { return mrmActionOut_(a, today); });
+  actions.sort(function (x, y) {
+    if (x.open !== y.open) return x.open ? -1 : 1;
+    if (x.overdue !== y.overdue) return x.overdue ? -1 : 1;
+    var s = (x.severity in sevRank ? sevRank[x.severity] : 9) - (y.severity in sevRank ? sevRank[y.severity] : 9);
+    if (s) return s;
+    return String(x.target || '9999').localeCompare(String(y.target || '9999'));
+  });
+  var meetings = readTable_('MrmMeetings').rows.filter(function (m) { return m.MeetingID && isActive_(m); })
+    .map(mrmMeetingOut_).sort(function (a, b) { return String(b.date).localeCompare(String(a.date)) || String(b.id).localeCompare(String(a.id)); });
+  var open = actions.filter(function (a) { return a.open; });
+  return {
+    today: today, statuses: MRM_STATUSES, severities: MRM_SEVERITIES,
+    stats: { open: open.length, overdue: open.filter(function (a) { return a.overdue; }).length,
+      critical: open.filter(function (a) { return a.severity === 'critical'; }).length,
+      chronic: open.filter(function (a) { return a.carried >= 3; }).length,
+      done: actions.filter(function (a) { return a.status === 'Done'; }).length, meetings: meetings.length,
+      lastMeeting: meetings.length ? meetings[0].date : '' },
+    actions: actions, meetings: meetings
+  };
+}
+
+/** Writes one action (new or changed). Returns its ID. Caller holds the lock. */
+function mrmSaveAction_(a, meetingId, today) {
+  var t = readTable_('MrmActions', true), now = new Date();
+  var id = cleanId_(a.id), row = id ? find_(t.rows, 'ActionID', id) : null;
+  if (id && !row) throw userError_('Action not found: ' + id);
+  var item = clean_(a.item, 300), status = MRM_STATUSES.indexOf(String(a.status)) >= 0 ? String(a.status) : '';
+  var sev = MRM_SEVERITIES.indexOf(String(a.severity)) >= 0 ? String(a.severity) : '';
+  var target = mrmDay_(a.target), note = clean_(a.note, 1000), where = meetingId ? ' (' + meetingId + ')' : '';
+  if (!row) {
+    if (!item) throw userError_('Write what the action is.');
+    id = mrmNextId_(t.rows, 'ActionID', 'MA-');
+    appendObj_('MrmActions', { ActionID: id, MeetingID: meetingId || '', Item: item, Category: clean_(a.category, 80), Owner: clean_(a.owner, 120),
+      Target: target, Severity: sev || 'medium', Status: status || 'Open', Carried: 0, Progress: note,
+      History: today + where + ': raised' + (note ? ' — ' + note : ''), DoneAt: status === 'Done' ? today : '', Active: 'Yes', Created: now, Updated: now });
+    mrmLog_('action added', id, item + ' · ' + (clean_(a.owner, 120) || 'no owner') + ' · ' + (target || 'no date'));
+    return id;
+  }
+  var ch = {}, said = [];
+  if (item && item !== String(row.Item)) { ch.Item = item; said.push('text changed'); }
+  if (a.category !== undefined && clean_(a.category, 80) !== String(row.Category || '')) { ch.Category = clean_(a.category, 80); said.push('category ' + ch.Category); }
+  if (a.owner !== undefined && clean_(a.owner, 120) !== String(row.Owner || '')) { ch.Owner = clean_(a.owner, 120); said.push('owner ' + ch.Owner); }
+  if (sev && sev !== String(row.Severity)) { ch.Severity = sev; said.push(sev); }
+  var oldTarget = mrmDay_(row.Target), oldStatus = String(row.Status || 'Open');
+  var newStatus = status || oldStatus, stillOpen = newStatus === 'Open' || newStatus === 'In progress';
+  if (target && target !== oldTarget) {
+    ch.Target = target; said.push('target ' + (oldTarget || '—') + ' → ' + target);
+    if (oldTarget && target > oldTarget && stillOpen) ch.Carried = (Number(row.Carried) || 0) + 1;   // the date moved out again
+  }
+  if (status && status !== oldStatus) {
+    ch.Status = status; said.push(status);
+    ch.DoneAt = status === 'Done' ? today : '';
+  }
+  if (note) { ch.Progress = note; said.push(note); }
+  if (a.remove) { ch.Active = 'No'; said.push('removed'); }
+  if (!said.length) return id;
+  ch.History = (String(row.History || '') + '\n' + today + where + ': ' + said.join(' — ')).replace(/^\n/, '');
+  ch.Updated = now;
+  setCells_(t, row, ch);
+  mrmLog_('action updated', id, said.join(' — '));
+  return id;
+}
+
+/** PUBLIC (General MRM page): add or change one action item. */
+function apiMrmActionSave_(p) {
+  ensureMrm_();
+  var lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    var id = mrmSaveAction_(p.a || {}, cleanId_(p.meetingId), Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'));
+    return { id: id };
+  } finally { lock.releaseLock(); }
+}
+
+/** PUBLIC (General MRM page): save a meeting with its minutes, the review of open actions and the new actions. */
+function apiMrmMeetingSave_(p) {
+  ensureMrm_();
+  var m = p.m || {};
+  var date = mrmDay_(m.date);
+  if (!date) throw userError_('Pick the meeting date.');
+  var lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    var t = readTable_('MrmMeetings', true), now = new Date();
+    var id = cleanId_(m.id), row = id ? find_(t.rows, 'MeetingID', id) : null;
+    if (id && !row) throw userError_('Meeting not found: ' + id);
+    var fields = { Date: date, Title: clean_(m.title, 120) || 'Monthly MRM', Chair: clean_(m.chair, 120), Attendees: clean_(m.attendees, 1500),
+      Agenda: clean_(m.agenda, 3000), Minutes: clean_(m.minutes, 20000), Decisions: clean_(m.decisions, 5000), NextDate: mrmDay_(m.nextDate),
+      Status: m.status === 'Final' ? 'Final' : 'Draft', MomFileId: m.momUrl ? driveId_(m.momUrl) : (row ? String(row.MomFileId || '') : ''), Updated: now };
+    if (m.remove && row) fields.Active = 'No';
+    if (row) { setCells_(t, row, fields); mrmLog_(m.remove ? 'meeting removed' : 'meeting updated', id, date + ' ' + fields.Title); }
+    else {
+      id = mrmNextId_(t.rows, 'MeetingID', 'GM-');
+      appendObj_('MrmMeetings', Object.assign({ MeetingID: id, Active: 'Yes', Created: now }, fields));
+      mrmLog_('meeting added', id, date + ' ' + fields.Title);
+    }
+    var reviewed = 0, added = 0;
+    (p.reviews || []).slice(0, 200).forEach(function (r) { if (r && r.id) { mrmSaveAction_(r, id, date); reviewed++; } });
+    (p.newActions || []).slice(0, 100).forEach(function (r) { if (r && clean_(r.item, 300)) { r = Object.assign({}, r); delete r.id; mrmSaveAction_(r, id, date); added++; } });
+    return { id: id, reviewed: reviewed, added: added };
+  } finally { lock.releaseLock(); }
 }
